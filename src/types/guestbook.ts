@@ -1,3 +1,5 @@
+import type { Timestamp } from 'firebase/firestore';
+
 export type KategoriAsal =
   | 'Instansi / Kantor'
   | 'Sekolah / Universitas'
@@ -85,7 +87,7 @@ export interface GuestEntry {
   kategoriAsal: KategoriAsal;
   pesan: string;
   status: GuestStatus;
-  createdAt: string | null;
+  createdAt: Timestamp | null;
 }
 
 export interface GuestbookEvent {
@@ -97,8 +99,8 @@ export interface GuestbookEvent {
   location: string;
   isActive: boolean;
   createdBy: string;
-  createdAt: string | null;
-  updatedAt: string | null;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
 }
 
 export interface AdminUser {
@@ -106,7 +108,7 @@ export interface AdminUser {
   email: string;
   displayName: string;
   role: 'admin' | 'superadmin';
-  createdAt: string | null;
+  createdAt: Timestamp | null;
 }
 
 export const DEFAULT_EVENT_FALLBACK: Omit<

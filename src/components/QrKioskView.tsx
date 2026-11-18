@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { QRCodeCanvas } from 'qrcode.react';
 import {
   Check,
@@ -10,10 +11,7 @@ import {
   QrCode,
   Smartphone,
 } from 'lucide-react';
-import {
-  fetchPublicEvent,
-  subscribePublicEventStream,
-} from '../lib/apiClient';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   DEFAULT_BANNER_IMAGE,
   DEFAULT_EVENT_FALLBACK,
@@ -82,27 +80,25 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
       return;
     }
 
-    let cancelled = false;
-    const applyEvent = (ev: GuestbookEvent) => {
-      const headingName = ev.headingName || DEFAULT_EVENT_FALLBACK.headingName;
-      setEventDetail({
-        id: ev.id,
-        headingName,
-        bannerImage: ev.bannerImage || DEFAULT_BANNER_IMAGE,
-        title: ev.title || DEFAULT_EVENT_FALLBACK.title,
-        subtitle: ev.subtitle || DEFAULT_EVENT_FALLBACK.subtitle,
-        location: ev.location || DEFAULT_EVENT_FALLBACK.location,
-        isActive: typeof ev.isActive === 'boolean' ? ev.isActive : true,
-      });
-      setBannerError(false);
-      onHeadingSync?.(headingName);
-    };
-
-    void fetchPublicEvent(safeEventId)
-      .then((ev) => {
-        if (cancelled) return;
-        if (ev) {
-          applyEvent(ev);
+    const unsub = onSnapshot(
+      doc(db, 'events', safeEventId),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          const headingName = String(
+            data.headingName || DEFAULT_EVENT_FALLBACK.headingName
+          );
+          setEventDetail({
+            id: snap.id,
+            headingName,
+            bannerImage: String(data.bannerImage || DEFAULT_BANNER_IMAGE),
+            title: String(data.title || DEFAULT_EVENT_FALLBACK.title),
+            subtitle: String(data.subtitle || DEFAULT_EVENT_FALLBACK.subtitle),
+            location: String(data.location || DEFAULT_EVENT_FALLBACK.location),
+            isActive: typeof data.isActive === 'boolean' ? data.isActive : true,
+          });
+          setBannerError(false);
+          onHeadingSync?.(headingName);
         } else {
           setEventDetail({
             id: DEFAULT_EVENT_ID,
@@ -116,21 +112,13 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
           setBannerError(false);
           onHeadingSync?.(DEFAULT_EVENT_FALLBACK.headingName);
         }
-      })
-      .catch((err) => {
-        console.error('Gagal memuat info acara kiosk:', err);
-      });
-
-    const unsub = subscribePublicEventStream(safeEventId, (ev) => {
-      if (!cancelled) {
-        applyEvent(ev);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, `events/${safeEventId}`);
       }
-    });
+    );
 
-    return () => {
-      cancelled = true;
-      unsub();
-    };
+    return () => unsub();
   }, [safeEventId, events, onHeadingSync]);
 
   const checkInUrl =

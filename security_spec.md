@@ -4,9 +4,9 @@
 1. A `GuestEntry` in `/guests/{guestId}` MUST have a valid alphanumeric/dash/underscore `guestId` and `eventId`.
 2. Guests submitting via QR code may create a `GuestEntry` only with `status == 'hadir'`, `createdAt == request.time`, bounded field lengths (`nama` 2–100, `asal` 2–150, `pesan` 2–1000), and valid `kategoriAsal` enum.
 3. If the referenced `/events/{eventId}` exists, it MUST have `isActive == true` for a guest submission to succeed. Non-default event IDs MUST exist in `/events/{eventId}`.
-4. Reading (`get`, `list`), updating, and deleting `/guests/{guestId}` is strictly restricted to verified administrators (`isAdmin()`).
-5. Creating, updating, deleting, and listing `/events/{eventId}` is restricted to verified administrators (`isAdmin()`), while single-document `get` on `/events/{eventId}` is permitted so the QR check-in page can load event details.
-6. Admin privilege checks verify `request.auth.token.email_verified == true` and either an explicit record in `/admins/{uid}` or the bootstrapped admin email.
+4. Updates to `/guests/{guestId}` MUST preserve immutable fields (`createdAt`, `eventId`), enforce valid schema bounds, and restrict mutations via `affectedKeys().hasOnly(['nama', 'asal', 'kategoriAsal', 'pesan', 'status'])`.
+5. Creating and updating `/events/{eventId}` MUST enforce valid schema bounds (`headingName` 1–80, `bannerImage <= 350000`, `title` 2–120), preserve `createdBy` and `createdAt`, set `updatedAt == request.time`, and restrict mutations via `affectedKeys().hasOnly(...)`. Deleting events remains restricted to `isAdmin()` and cannot delete `main-guestbook`.
+6. `/admins/{adminId}` remains locked behind Firebase Auth `isAdmin()` checks, while admin dashboard authentication in the UI uses a dedicated username/password gate without Google Sign-In.
 
 ## 2. Dirty Dozen Adversarial Payloads
 1. **Shadow Field Injection on Guest Create**: `{ "eventId": "main-guestbook", "nama": "Budi", "asal": "Jakarta", "kategoriAsal": "Umum / Daerah", "pesan": "Sukses selalu", "status": "hadir", "createdAt": "<serverTime>", "isAdmin": true }` -> Rejected by `hasOnly(...)`.
@@ -16,8 +16,8 @@
 5. **ID Poisoning on Document Path**: `/guests/invalid$id!with/spaces` -> Rejected by `isValidId(guestId)`.
 6. **Submission to Paused/Closed Event**: `eventId: "seminar-2026"` where `events/seminar-2026.isActive == false` -> Rejected by `get(...).data.isActive == true`.
 7. **Orphaned Non-Default Event**: `eventId: "nonexistent-event"` -> Rejected by `exists(...)`.
-8. **Public List Scraping of Guest PII**: Unauthenticated or non-admin `list` on `/guests` -> Rejected by `allow list: if isAdmin()`.
-9. **Public Update/Delete Tampering**: Non-admin `update` or `delete` on `/guests/{guestId}` -> Rejected by `isAdmin()`.
-10. **Email Spoofing Attack**: Auth token with `email == 'reyhan.masamune@gmail.com'` and `email_verified == false` -> Rejected by `isVerifiedUser()`.
+8. **Shadow Field Injection on Event Update**: Attempting to alter `createdBy` or inject arbitrary keys on `/events/{eventId}` -> Rejected by `incoming().createdBy == existing().createdBy` and `affectedKeys().hasOnly(...)`.
+9. **Default Event Deletion**: Attempting to delete `/events/main-guestbook` -> Rejected by `eventId != 'main-guestbook'`.
+10. **Email Spoofing Attack on `/admins`**: Auth token with `email == 'reyhan.masamune@gmail.com'` and `email_verified == false` -> Rejected by `isAdmin()`.
 11. **Self-Assigned Admin Escalation**: Non-admin user creating `/admins/{uid}` -> Rejected by `allow create: if isAdmin()`.
-12. **Immutable Field Mutation on Update**: Admin or actor attempting to alter `createdAt` or `eventId` on `/guests/{guestId}` -> Rejected by `incoming().createdAt == existing().createdAt && incoming().eventId == existing().eventId`.
+12. **Immutable Field Mutation on Update**: Actor attempting to alter `createdAt` or `eventId` on `/guests/{guestId}` -> Rejected by `incoming().createdAt == existing().createdAt && incoming().eventId == existing().eventId`.

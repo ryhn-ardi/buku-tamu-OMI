@@ -1,5 +1,12 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
+  deleteDoc,
+  doc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore';
+import {
   Building2,
   Calendar,
   CheckCircle2,
@@ -23,16 +30,12 @@ import {
   User as UserIcon,
   X,
 } from 'lucide-react';
-import {
-  adminCreateEvent,
-  adminDeleteGuest,
-  adminUpdateEvent,
-  adminUpdateGuest,
-} from '../lib/apiClient';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   exportGuestsToExcel,
   exportGuestsToPdf,
   formatGuestTimestamp,
+  toJsDate,
 } from '../lib/exportUtils';
 import { compressImageFileToDataUrl } from '../lib/imageUtils';
 import {
@@ -58,9 +61,6 @@ interface AdminDashboardViewProps {
   onAdminLogin: (username: string, password: string) => Promise<void>;
   onAdminLogout: () => Promise<void>;
   onOpenKioskForEvent: (eventId: string) => void;
-  onGuestUpdated: (guest: GuestEntry) => void;
-  onGuestDeleted: (guestId: string) => void;
-  onEventSaved: (event: GuestbookEvent) => void;
 }
 
 type ImageSourceMode = 'presets' | 'upload' | 'url';
@@ -75,9 +75,6 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   onAdminLogin,
   onAdminLogout,
   onOpenKioskForEvent,
-  onGuestUpdated,
-  onGuestDeleted,
-  onEventSaved,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchField, setSearchField] = useState<'all' | 'nama' | 'asal' | 'pesan'>('all');
@@ -195,9 +192,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         return false;
       }
       if (dateFilter !== 'all') {
-        if (!g.createdAt) return false;
-        const guestDate = new Date(g.createdAt);
-        if (Number.isNaN(guestDate.getTime())) return false;
+        const guestDate = toJsDate(g.createdAt);
+        if (!guestDate) return false;
         if (dateFilter === 'today' && toLocalDateKey(guestDate) !== todayKey) {
           return false;
         }
@@ -236,7 +232,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     specificDate,
   ]);
 
-  // Real KPI stats computed from guest entries
+  // Real KPI stats computed from Firestore documents
   const kpiStats = useMemo(() => {
     const todayStr = new Date().toDateString();
     const baseList =
@@ -245,9 +241,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         : guests.filter((g) => g.eventId === selectedEventFilter);
 
     const todayCount = baseList.filter((g) => {
-      if (!g.createdAt) return false;
-      const d = new Date(g.createdAt);
-      return !Number.isNaN(d.getTime()) && d.toDateString() === todayStr;
+      const d = toJsDate(g.createdAt);
+      return Boolean(d && d.toDateString() === todayStr);
     }).length;
 
     const verifiedCount = baseList.filter((g) => g.status === 'terverifikasi').length;
@@ -281,14 +276,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     setActionError(null);
     const nextStatus: GuestStatus = guest.status === 'hadir' ? 'terverifikasi' : 'hadir';
     try {
-      const updated = await adminUpdateGuest(guest.id, {
+      await updateDoc(doc(db, 'guests', guest.id), {
         status: nextStatus,
       });
-      onGuestUpdated(updated);
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : 'Gagal memperbarui status kehadiran.'
       );
+      handleFirestoreError(err, OperationType.UPDATE, `guests/${guest.id}`);
     }
   };
 
@@ -320,19 +315,19 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
     setSavingGuest(true);
     try {
-      const updated = await adminUpdateGuest(editingGuest.id, {
+      await updateDoc(doc(db, 'guests', editingGuest.id), {
         nama: cleanNama,
         asal: cleanAsal,
         kategoriAsal: editKategori,
         pesan: cleanPesan,
         status: editStatus,
       });
-      onGuestUpdated(updated);
       setEditingGuest(null);
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : 'Gagal menyimpan perubahan data tamu.'
       );
+      handleFirestoreError(err, OperationType.UPDATE, `guests/${editingGuest.id}`);
     } finally {
       setSavingGuest(false);
     }
@@ -341,13 +336,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const handleDeleteGuest = async (guestId: string) => {
     setActionError(null);
     try {
-      await adminDeleteGuest(guestId);
-      onGuestDeleted(guestId);
+      await deleteDoc(doc(db, 'guests', guestId));
       setConfirmDeleteId(null);
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : 'Gagal menghapus data tamu.'
       );
+      handleFirestoreError(err, OperationType.DELETE, `guests/${guestId}`);
     }
   };
 
@@ -490,30 +485,35 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
     setSavingEvent(true);
     try {
-      const saved = isCreatingNewEvent
-        ? await adminCreateEvent({
-            id: targetId,
-            headingName: cleanHeading,
-            bannerImage: cleanBanner,
-            title: cleanTitle,
-            subtitle: cleanSubtitle,
-            location: cleanLocation,
-            isActive: eventIsActive,
-          })
-        : await adminUpdateEvent(targetId, {
-            headingName: cleanHeading,
-            bannerImage: cleanBanner,
-            title: cleanTitle,
-            subtitle: cleanSubtitle,
-            location: cleanLocation,
-            isActive: eventIsActive,
-          });
-      onEventSaved(saved);
+      if (isCreatingNewEvent) {
+        await setDoc(doc(db, 'events', targetId), {
+          headingName: cleanHeading,
+          bannerImage: cleanBanner,
+          title: cleanTitle,
+          subtitle: cleanSubtitle,
+          location: cleanLocation,
+          isActive: eventIsActive,
+          createdBy: 'admin',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(doc(db, 'events', targetId), {
+          headingName: cleanHeading,
+          bannerImage: cleanBanner,
+          title: cleanTitle,
+          subtitle: cleanSubtitle,
+          location: cleanLocation,
+          isActive: eventIsActive,
+          updatedAt: serverTimestamp(),
+        });
+      }
       setShowEventModal(false);
     } catch (err) {
       setEventFormError(
         err instanceof Error ? err.message : 'Gagal menyimpan pengaturan acara.'
       );
+      handleFirestoreError(err, OperationType.WRITE, `events/${targetId}`);
     } finally {
       setSavingEvent(false);
     }

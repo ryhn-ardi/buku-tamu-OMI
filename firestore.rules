@@ -70,15 +70,12 @@ service cloud.firestore {
     // Events Collection
     match /events/{eventId} {
       allow get: if isValidId(eventId);
-      allow list: if isAdmin();
-      allow create: if isAdmin() &&
-        isValidId(eventId) &&
+      allow list: if resource.data.title is string && resource.data.isActive is bool;
+      allow create: if isValidId(eventId) &&
         isValidEvent(incoming()) &&
-        incoming().createdBy == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() &&
-        isValidId(eventId) &&
+      allow update: if isValidId(eventId) &&
         isValidEvent(incoming()) &&
         incoming().createdBy == existing().createdBy &&
         incoming().createdAt == existing().createdAt &&
@@ -89,8 +86,8 @@ service cloud.firestore {
 
     // Guests Collection (QR Code Check-in + Admin Live Monitoring)
     match /guests/{guestId} {
-      allow get: if isAdmin() && isValidId(guestId);
-      allow list: if isAdmin();
+      allow get: if isValidId(guestId);
+      allow list: if resource.data.eventId is string && resource.data.nama is string;
       allow create: if isValidId(guestId) &&
         isValidGuest(incoming()) &&
         incoming().status == 'hadir' &&
@@ -99,13 +96,12 @@ service cloud.firestore {
           (incoming().eventId == 'main-guestbook' && !exists(/databases/$(database)/documents/events/$(incoming().eventId))) ||
           (exists(/databases/$(database)/documents/events/$(incoming().eventId)) && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isActive == true)
         );
-      allow update: if isAdmin() &&
-        isValidId(guestId) &&
+      allow update: if isValidId(guestId) &&
         isValidGuest(incoming()) &&
         incoming().createdAt == existing().createdAt &&
         incoming().eventId == existing().eventId &&
         incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'asal', 'kategoriAsal', 'pesan', 'status']);
-      allow delete: if isAdmin() && isValidId(guestId);
+      allow delete: if isValidId(guestId);
     }
 
     // Admins Collection

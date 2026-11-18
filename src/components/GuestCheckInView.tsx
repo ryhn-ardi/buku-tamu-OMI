@@ -1,4 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+} from 'firebase/firestore';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Building2,
@@ -12,11 +19,7 @@ import {
   Users,
   XCircle,
 } from 'lucide-react';
-import {
-  fetchPublicEvent,
-  submitGuestEntry,
-  subscribePublicEventStream,
-} from '../lib/apiClient';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   DEFAULT_BANNER_IMAGE,
   DEFAULT_EVENT_FALLBACK,
@@ -77,29 +80,29 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
   const [receipt, setReceipt] = useState<SubmittedReceipt | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
     setLoadingEvent(true);
-
-    const applyEventData = (ev: GuestbookEvent) => {
-      const headingName = ev.headingName || DEFAULT_EVENT_FALLBACK.headingName;
-      setEventInfo({
-        id: ev.id,
-        headingName,
-        bannerImage: ev.bannerImage || DEFAULT_BANNER_IMAGE,
-        title: ev.title || DEFAULT_EVENT_FALLBACK.title,
-        subtitle: ev.subtitle || DEFAULT_EVENT_FALLBACK.subtitle,
-        location: ev.location || DEFAULT_EVENT_FALLBACK.location,
-        isActive: typeof ev.isActive === 'boolean' ? ev.isActive : true,
-      });
-      setBannerError(false);
-      onHeadingSync?.(headingName);
-    };
-
-    void fetchPublicEvent(safeEventId)
-      .then((ev) => {
-        if (cancelled) return;
-        if (ev) {
-          applyEventData(ev);
+    const unsub = onSnapshot(
+      doc(db, 'events', safeEventId),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          const headingName = String(
+            data.headingName || DEFAULT_EVENT_FALLBACK.headingName
+          );
+          const bannerImage = String(
+            data.bannerImage || DEFAULT_BANNER_IMAGE
+          );
+          setEventInfo({
+            id: snap.id,
+            headingName,
+            bannerImage,
+            title: String(data.title || DEFAULT_EVENT_FALLBACK.title),
+            subtitle: String(data.subtitle || DEFAULT_EVENT_FALLBACK.subtitle),
+            location: String(data.location || DEFAULT_EVENT_FALLBACK.location),
+            isActive: typeof data.isActive === 'boolean' ? data.isActive : true,
+          });
+          setBannerError(false);
+          onHeadingSync?.(headingName);
         } else if (safeEventId === DEFAULT_EVENT_ID) {
           setEventInfo({
             id: DEFAULT_EVENT_ID,
@@ -123,26 +126,15 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
             isActive: false,
           });
         }
-      })
-      .catch((err) => {
-        console.error('Gagal memuat data acara:', err);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingEvent(false);
-        }
-      });
-
-    const unsub = subscribePublicEventStream(safeEventId, (ev) => {
-      if (!cancelled) {
-        applyEventData(ev);
+        setLoadingEvent(false);
+      },
+      (err) => {
+        setLoadingEvent(false);
+        handleFirestoreError(err, OperationType.GET, `events/${safeEventId}`);
       }
-    });
+    );
 
-    return () => {
-      cancelled = true;
-      unsub();
-    };
+    return () => unsub();
   }, [safeEventId, onHeadingSync]);
 
   const checkInUrl =
@@ -193,40 +185,42 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
 
     setSubmitting(true);
     try {
-      const created = await submitGuestEntry({
+      const guestRef = doc(collection(db, 'guests'));
+      await setDoc(guestRef, {
         eventId: safeEventId,
         nama: cleanNama,
         asal: cleanAsal,
         kategoriAsal,
         pesan: cleanPesan,
+        status: 'hadir',
+        createdAt: serverTimestamp(),
       });
 
-      const submittedDate = created.createdAt ? new Date(created.createdAt) : new Date();
       const nowStr = new Intl.DateTimeFormat('id-ID', {
         day: '2-digit',
         month: 'long',
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
-      }).format(submittedDate);
+      }).format(new Date());
 
       setReceipt({
-        id: created.id,
-        nama: created.nama,
-        asal: created.asal,
-        kategoriAsal: created.kategoriAsal,
-        pesan: created.pesan,
+        id: guestRef.id,
+        nama: cleanNama,
+        asal: cleanAsal,
+        kategoriAsal,
+        pesan: cleanPesan,
         submittedAt: nowStr,
       });
       setNama('');
       setAsal('');
       setPesan('');
     } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : 'Gagal menyimpan data kehadiran. Silakan periksa koneksi Anda dan coba lagi.';
-      setFormError(msg);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('permission') || msg.includes('PERMISSION_DENIED')) {
+        handleFirestoreError(err, OperationType.CREATE, 'guests');
+      }
+      setFormError('Gagal menyimpan data kehadiran. Silakan periksa koneksi Anda dan coba lagi.');
     } finally {
       setSubmitting(false);
     }

@@ -3,10 +3,22 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { GuestEntry } from '../types/guestbook';
 
-export function formatGuestTimestamp(timestamp: GuestEntry['createdAt']): string {
-  if (!timestamp) return '-';
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '-';
+export function toJsDate(timestamp: GuestEntry['createdAt'] | string): Date | null {
+  if (!timestamp) return null;
+  if (typeof timestamp === 'object' && 'toDate' in timestamp && typeof timestamp.toDate === 'function') {
+    const d = timestamp.toDate();
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof timestamp === 'string') {
+    const d = new Date(timestamp);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+export function formatGuestTimestamp(timestamp: GuestEntry['createdAt'] | string): string {
+  const date = toJsDate(timestamp);
+  if (!date) return '-';
   return new Intl.DateTimeFormat('id-ID', {
     day: '2-digit',
     month: 'short',
@@ -16,10 +28,9 @@ export function formatGuestTimestamp(timestamp: GuestEntry['createdAt']): string
   }).format(date);
 }
 
-export function formatGuestTimeOnly(timestamp: GuestEntry['createdAt']): string {
-  if (!timestamp) return '--:--';
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '--:--';
+export function formatGuestTimeOnly(timestamp: GuestEntry['createdAt'] | string): string {
+  const date = toJsDate(timestamp);
+  if (!date) return '--:--';
   return new Intl.DateTimeFormat('id-ID', {
     hour: '2-digit',
     minute: '2-digit',

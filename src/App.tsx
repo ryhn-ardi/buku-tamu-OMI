@@ -1,20 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+} from 'firebase/firestore';
 import { LayoutDashboard, QrCode, ClipboardPen } from 'lucide-react';
+import { db, handleFirestoreError, OperationType } from './lib/firebase';
 import {
-  adminBootstrap,
-  adminCheckSession,
-  adminLogin,
-  adminLogout,
-  setStoredAdminToken,
-  subscribeAdminStream,
-} from './lib/apiClient';
+  ADMIN_GATE_STORAGE_KEY,
+  verifyAdminCredentials,
+} from './lib/authUtils';
 import {
+  DEFAULT_BANNER_IMAGE,
   DEFAULT_EVENT_FALLBACK,
   DEFAULT_EVENT_ID,
   SCHEMA_LIMITS,
   type AppViewMode,
   type GuestbookEvent,
   type GuestEntry,
+  type GuestStatus,
+  type KategoriAsal,
 } from './types/guestbook';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { GuestCheckInView } from './components/GuestCheckInView';
@@ -57,14 +67,18 @@ function GuestbookApp() {
     DEFAULT_EVENT_FALLBACK.headingName
   );
 
-  const [authReady, setAuthReady] = useState<boolean>(false);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [authReady] = useState<boolean>(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.sessionStorage.getItem(ADMIN_GATE_STORAGE_KEY) === 'true';
+  });
 
   const [guests, setGuests] = useState<GuestEntry[]>([]);
   const [events, setEvents] = useState<GuestbookEvent[]>([]);
   const [loadingAdminData, setLoadingAdminData] = useState<boolean>(false);
   const [recentArrival, setRecentArrival] = useState<GuestEntry | null>(null);
 
+  const initialGuestsLoadedRef = useRef(false);
   const arrivalTimerRef = useRef<number | null>(null);
 
   const handleHeadingSync = useCallback((heading: string) => {
@@ -96,91 +110,118 @@ function GuestbookApp() {
     }
   }, [events, activeEventId]);
 
-  // Verify existing admin session on initial load
-  useEffect(() => {
-    let cancelled = false;
-    void adminCheckSession()
-      .then((valid) => {
-        if (!cancelled) {
-          setIsAuthenticated(valid);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setAuthReady(true);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Load initial admin data & attach SSE real-time stream when authenticated
+  // Attach real-time Firestore listeners when authenticated as Admin
   useEffect(() => {
     if (!authReady || !isAuthenticated) {
+      initialGuestsLoadedRef.current = false;
       return;
     }
 
-    let cancelled = false;
     setLoadingAdminData(true);
 
-    void adminBootstrap()
-      .then((data) => {
-        if (cancelled) return;
-        setGuests(data.guests);
-        setEvents(data.events);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error('Gagal memuat data admin:', err);
-        setStoredAdminToken(null);
-        setIsAuthenticated(false);
-        setGuests([]);
-        setEvents([]);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingAdminData(false);
+    async function ensureDefaultEvent() {
+      try {
+        const defaultRef = doc(db, 'events', DEFAULT_EVENT_ID);
+        const snap = await getDoc(defaultRef);
+        if (!snap.exists()) {
+          await setDoc(defaultRef, {
+            headingName: DEFAULT_EVENT_FALLBACK.headingName,
+            bannerImage: DEFAULT_EVENT_FALLBACK.bannerImage,
+            title: DEFAULT_EVENT_FALLBACK.title,
+            subtitle: DEFAULT_EVENT_FALLBACK.subtitle,
+            location: DEFAULT_EVENT_FALLBACK.location,
+            isActive: true,
+            createdBy: 'admin',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
         }
-      });
-
-    const unsubStream = subscribeAdminStream((evt) => {
-      if (cancelled) return;
-      if (evt.type === 'guest-added') {
-        const added = evt.payload;
-        setGuests((prev) => {
-          if (prev.some((g) => g.id === added.id)) return prev;
-          return [added, ...prev];
-        });
-        setRecentArrival(added);
-        if (arrivalTimerRef.current) {
-          window.clearTimeout(arrivalTimerRef.current);
-        }
-        arrivalTimerRef.current = window.setTimeout(() => {
-          setRecentArrival(null);
-        }, 8000);
-      } else if (evt.type === 'guest-updated') {
-        const updated = evt.payload;
-        setGuests((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
-      } else if (evt.type === 'guest-deleted') {
-        const deletedId = evt.payload.id;
-        setGuests((prev) => prev.filter((g) => g.id !== deletedId));
-      } else if (evt.type === 'event-updated') {
-        const savedEvent = evt.payload;
-        setEvents((prev) => {
-          const exists = prev.some((e) => e.id === savedEvent.id);
-          if (exists) {
-            return prev.map((e) => (e.id === savedEvent.id ? savedEvent : e));
-          }
-          return [savedEvent, ...prev];
-        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `events/${DEFAULT_EVENT_ID}`);
       }
-    });
+    }
+
+    void ensureDefaultEvent();
+
+    const guestsQuery = query(collection(db, 'guests'), orderBy('createdAt', 'desc'));
+    const unsubGuests = onSnapshot(
+      guestsQuery,
+      (snapshot) => {
+        const nextGuests: GuestEntry[] = snapshot.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            eventId: String(data.eventId || DEFAULT_EVENT_ID),
+            nama: String(data.nama || ''),
+            asal: String(data.asal || ''),
+            kategoriAsal: (data.kategoriAsal || 'Umum / Daerah') as KategoriAsal,
+            pesan: String(data.pesan || ''),
+            status: (data.status || 'hadir') as GuestStatus,
+            createdAt: data.createdAt || null,
+          };
+        });
+
+        if (initialGuestsLoadedRef.current) {
+          const addedChanges = snapshot
+            .docChanges()
+            .filter((ch) => ch.type === 'added');
+          if (addedChanges.length > 0 && nextGuests.length > 0) {
+            const newestId = addedChanges[0].doc.id;
+            const newestGuest = nextGuests.find((g) => g.id === newestId);
+            if (newestGuest) {
+              setRecentArrival(newestGuest);
+              if (arrivalTimerRef.current) {
+                window.clearTimeout(arrivalTimerRef.current);
+              }
+              arrivalTimerRef.current = window.setTimeout(() => {
+                setRecentArrival(null);
+              }, 8000);
+            }
+          }
+        } else {
+          initialGuestsLoadedRef.current = true;
+        }
+
+        setGuests(nextGuests);
+        setLoadingAdminData(false);
+      },
+      (error) => {
+        setLoadingAdminData(false);
+        handleFirestoreError(error, OperationType.LIST, 'guests');
+      }
+    );
+
+    const eventsQuery = query(collection(db, 'events'), orderBy('createdAt', 'desc'));
+    const unsubEvents = onSnapshot(
+      eventsQuery,
+      (snapshot) => {
+        const nextEvents: GuestbookEvent[] = snapshot.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            headingName: String(
+              data.headingName || DEFAULT_EVENT_FALLBACK.headingName
+            ),
+            bannerImage: String(data.bannerImage || DEFAULT_BANNER_IMAGE),
+            title: String(data.title || DEFAULT_EVENT_FALLBACK.title),
+            subtitle: String(data.subtitle || DEFAULT_EVENT_FALLBACK.subtitle),
+            location: String(data.location || DEFAULT_EVENT_FALLBACK.location),
+            isActive: typeof data.isActive === 'boolean' ? data.isActive : true,
+            createdBy: String(data.createdBy || ''),
+            createdAt: data.createdAt || null,
+            updatedAt: data.updatedAt || null,
+          };
+        });
+        setEvents(nextEvents);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'events');
+      }
+    );
 
     return () => {
-      cancelled = true;
-      unsubStream();
+      unsubGuests();
+      unsubEvents();
       if (arrivalTimerRef.current) {
         window.clearTimeout(arrivalTimerRef.current);
       }
@@ -188,34 +229,24 @@ function GuestbookApp() {
   }, [authReady, isAuthenticated]);
 
   const handleAdminLogin = async (username: string, password: string) => {
-    await adminLogin(username, password);
+    const ok = await verifyAdminCredentials(username, password);
+    if (!ok) {
+      throw new Error('Username atau password salah. Silakan periksa kembali.');
+    }
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(ADMIN_GATE_STORAGE_KEY, 'true');
+    }
     setIsAuthenticated(true);
   };
 
   const handleAdminLogout = async () => {
-    await adminLogout();
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem(ADMIN_GATE_STORAGE_KEY);
+    }
     setIsAuthenticated(false);
     setGuests([]);
     setEvents([]);
     setRecentArrival(null);
-  };
-
-  const handleGuestUpdated = (updated: GuestEntry) => {
-    setGuests((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
-  };
-
-  const handleGuestDeleted = (guestId: string) => {
-    setGuests((prev) => prev.filter((g) => g.id !== guestId));
-  };
-
-  const handleEventSaved = (savedEvent: GuestbookEvent) => {
-    setEvents((prev) => {
-      const exists = prev.some((e) => e.id === savedEvent.id);
-      if (exists) {
-        return prev.map((e) => (e.id === savedEvent.id ? savedEvent : e));
-      }
-      return [savedEvent, ...prev];
-    });
   };
 
   const handlePrimaryHeaderAction = async () => {
@@ -348,9 +379,6 @@ function GuestbookApp() {
             onAdminLogin={handleAdminLogin}
             onAdminLogout={handleAdminLogout}
             onOpenKioskForEvent={(evId) => navigateTo('kiosk', evId, false)}
-            onGuestUpdated={handleGuestUpdated}
-            onGuestDeleted={handleGuestDeleted}
-            onEventSaved={handleEventSaved}
           />
         )}
       </main>
