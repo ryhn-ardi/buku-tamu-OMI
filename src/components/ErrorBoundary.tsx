@@ -50,7 +50,7 @@ export class ErrorBoundary extends React.Component<
               </h2>
             </div>
             <p className="text-sm text-slate-600 leading-relaxed mb-4">
-              Sistem menangkap kesalahan saat mengakses database. Silakan muat ulang halaman atau pastikan akun Anda memiliki izin yang sesuai.
+              Sistem menangkap kesalahan saat memuat data aplikasi. Silakan muat ulang halaman untuk mencoba kembali.
             </p>
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-6 text-xs font-mono text-slate-700 break-words">
               {displayDetail}

@@ -5,7 +5,8 @@ import type { GuestEntry } from '../types/guestbook';
 
 export function formatGuestTimestamp(timestamp: GuestEntry['createdAt']): string {
   if (!timestamp) return '-';
-  const date = timestamp.toDate();
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '-';
   return new Intl.DateTimeFormat('id-ID', {
     day: '2-digit',
     month: 'short',
@@ -17,7 +18,8 @@ export function formatGuestTimestamp(timestamp: GuestEntry['createdAt']): string
 
 export function formatGuestTimeOnly(timestamp: GuestEntry['createdAt']): string {
   if (!timestamp) return '--:--';
-  const date = timestamp.toDate();
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '--:--';
   return new Intl.DateTimeFormat('id-ID', {
     hour: '2-digit',
     minute: '2-digit',

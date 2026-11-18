@@ -1,5 +1,3 @@
-import type { Timestamp } from 'firebase/firestore';
-
 export type KategoriAsal =
   | 'Instansi / Kantor'
   | 'Sekolah / Universitas'
@@ -61,9 +59,6 @@ export const GUEST_STATUS_OPTIONS: readonly GuestStatus[] = [
   'terverifikasi',
 ] as const;
 
-/**
- * Synchronized verbatim with firebase-blueprint.json constraints
- */
 export const SCHEMA_LIMITS = {
   idPattern: /^[a-zA-Z0-9_-]+$/,
   idMax: 128,
@@ -90,7 +85,7 @@ export interface GuestEntry {
   kategoriAsal: KategoriAsal;
   pesan: string;
   status: GuestStatus;
-  createdAt: Timestamp | null;
+  createdAt: string | null;
 }
 
 export interface GuestbookEvent {
@@ -102,8 +97,8 @@ export interface GuestbookEvent {
   location: string;
   isActive: boolean;
   createdBy: string;
-  createdAt: Timestamp | null;
-  updatedAt: Timestamp | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface AdminUser {
@@ -111,7 +106,7 @@ export interface AdminUser {
   email: string;
   displayName: string;
   role: 'admin' | 'superadmin';
-  createdAt: Timestamp | null;
+  createdAt: string | null;
 }
 
 export const DEFAULT_EVENT_FALLBACK: Omit<

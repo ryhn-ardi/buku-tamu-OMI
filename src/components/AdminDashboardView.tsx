@@ -1,18 +1,8 @@
 import React, { useMemo, useRef, useState } from 'react';
-import type { User } from 'firebase/auth';
-import {
-  deleteDoc,
-  doc,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-} from 'firebase/firestore';
 import {
   Building2,
   Calendar,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   Edit3,
   Eye,
   EyeOff,
@@ -28,23 +18,23 @@ import {
   QrCode,
   Search,
   Settings2,
-  ShieldAlert,
   Trash2,
   Upload,
   User as UserIcon,
   X,
 } from 'lucide-react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import {
+  adminCreateEvent,
+  adminDeleteGuest,
+  adminUpdateEvent,
+  adminUpdateGuest,
+} from '../lib/apiClient';
 import {
   exportGuestsToExcel,
   exportGuestsToPdf,
   formatGuestTimestamp,
 } from '../lib/exportUtils';
 import { compressImageFileToDataUrl } from '../lib/imageUtils';
-import {
-  ADMIN_VIRTUAL_EMAIL,
-  verifyAdminCredentials,
-} from '../lib/authUtils';
 import {
   BANNER_PRESETS,
   DEFAULT_BANNER_IMAGE,
@@ -59,42 +49,35 @@ import {
 } from '../types/guestbook';
 
 interface AdminDashboardViewProps {
-  user: User | null;
+  isAuthenticated: boolean;
   authReady: boolean;
-  isAdmin: boolean;
-  adminGateUnlocked: boolean;
   guests: GuestEntry[];
   events: GuestbookEvent[];
   loadingData: boolean;
   recentArrival: GuestEntry | null;
-  onUnlockAdminGate: () => void;
-  onLockAdminGate: () => void;
-  onCredentialEmailLogin: (
-    email: string,
-    password: string
-  ) => Promise<{ ok: boolean; code?: string }>;
-  onSignIn: () => Promise<void>;
-  onSignOut: () => Promise<void>;
+  onAdminLogin: (username: string, password: string) => Promise<void>;
+  onAdminLogout: () => Promise<void>;
   onOpenKioskForEvent: (eventId: string) => void;
+  onGuestUpdated: (guest: GuestEntry) => void;
+  onGuestDeleted: (guestId: string) => void;
+  onEventSaved: (event: GuestbookEvent) => void;
 }
 
 type ImageSourceMode = 'presets' | 'upload' | 'url';
 
 export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
-  user,
+  isAuthenticated,
   authReady,
-  isAdmin,
-  adminGateUnlocked,
   guests,
   events,
   loadingData,
   recentArrival,
-  onUnlockAdminGate,
-  onLockAdminGate,
-  onCredentialEmailLogin,
-  onSignIn,
-  onSignOut,
+  onAdminLogin,
+  onAdminLogout,
   onOpenKioskForEvent,
+  onGuestUpdated,
+  onGuestDeleted,
+  onEventSaved,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchField, setSearchField] = useState<'all' | 'nama' | 'asal' | 'pesan'>('all');
@@ -103,7 +86,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | GuestStatus>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | '7days' | 'specific'>('all');
   const [specificDate, setSpecificDate] = useState<string>('');
-  const [signingIn, setSigningIn] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Username & Password Login Form states
   const [loginUsername, setLoginUsername] = useState('');
@@ -111,7 +94,6 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [submittingCredentials, setSubmittingCredentials] = useState(false);
-  const [showConsoleGuide, setShowConsoleGuide] = useState(false);
 
   // Guest Detail / Edit / Delete states
   const [viewingGuest, setViewingGuest] = useState<GuestEntry | null>(null);
@@ -144,15 +126,6 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [savingEvent, setSavingEvent] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleLoginClick = async () => {
-    setSigningIn(true);
-    try {
-      await onSignIn();
-    } finally {
-      setSigningIn(false);
-    }
-  };
-
   const handleCredentialSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
@@ -165,34 +138,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
     setSubmittingCredentials(true);
     try {
-      if (trimmedUser.includes('@')) {
-        const res = await onCredentialEmailLogin(trimmedUser, loginPassword);
-        if (res.ok) {
-          onUnlockAdminGate();
-          setLoginPassword('');
-        } else {
-          setLoginError(
-            res.code === 'auth/operation-not-allowed'
-              ? 'Provider Email/Password belum diaktifkan di Firebase Console.'
-              : 'Email atau password tidak sesuai.'
-          );
-        }
-        return;
-      }
-
-      const valid = await verifyAdminCredentials(trimmedUser, loginPassword);
-      if (!valid) {
-        setLoginError('Username atau password salah. Silakan periksa kembali.');
-        return;
-      }
-
-      // Attempt Firebase Email/Password login if enabled; otherwise proceed to Firebase session bridge
-      if (!user) {
-        await onCredentialEmailLogin(ADMIN_VIRTUAL_EMAIL, loginPassword);
-      }
-
-      onUnlockAdminGate();
+      await onAdminLogin(trimmedUser, loginPassword);
       setLoginPassword('');
+    } catch (err) {
+      setLoginError(
+        err instanceof Error
+          ? err.message
+          : 'Username atau password salah. Silakan periksa kembali.'
+      );
     } finally {
       setSubmittingCredentials(false);
     }
@@ -243,7 +196,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       }
       if (dateFilter !== 'all') {
         if (!g.createdAt) return false;
-        const guestDate = g.createdAt.toDate();
+        const guestDate = new Date(g.createdAt);
+        if (Number.isNaN(guestDate.getTime())) return false;
         if (dateFilter === 'today' && toLocalDateKey(guestDate) !== todayKey) {
           return false;
         }
@@ -282,7 +236,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     specificDate,
   ]);
 
-  // Real KPI stats computed from Firestore documents
+  // Real KPI stats computed from guest entries
   const kpiStats = useMemo(() => {
     const todayStr = new Date().toDateString();
     const baseList =
@@ -290,9 +244,11 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         ? guests
         : guests.filter((g) => g.eventId === selectedEventFilter);
 
-    const todayCount = baseList.filter(
-      (g) => g.createdAt && g.createdAt.toDate().toDateString() === todayStr
-    ).length;
+    const todayCount = baseList.filter((g) => {
+      if (!g.createdAt) return false;
+      const d = new Date(g.createdAt);
+      return !Number.isNaN(d.getTime()) && d.toDateString() === todayStr;
+    }).length;
 
     const verifiedCount = baseList.filter((g) => g.status === 'terverifikasi').length;
 
@@ -322,17 +278,22 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   }, [events, selectedEventFilter]);
 
   const handleToggleStatus = async (guest: GuestEntry) => {
+    setActionError(null);
     const nextStatus: GuestStatus = guest.status === 'hadir' ? 'terverifikasi' : 'hadir';
     try {
-      await updateDoc(doc(db, 'guests', guest.id), {
+      const updated = await adminUpdateGuest(guest.id, {
         status: nextStatus,
       });
+      onGuestUpdated(updated);
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `guests/${guest.id}`);
+      setActionError(
+        err instanceof Error ? err.message : 'Gagal memperbarui status kehadiran.'
+      );
     }
   };
 
   const openEditGuest = (guest: GuestEntry) => {
+    setActionError(null);
     setEditingGuest(guest);
     setEditNama(guest.nama);
     setEditAsal(guest.asal);
@@ -344,6 +305,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const handleSaveGuestEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingGuest) return;
+    setActionError(null);
 
     const cleanNama = editNama.trim().slice(0, SCHEMA_LIMITS.namaMax);
     const cleanAsal = editAsal.trim().slice(0, SCHEMA_LIMITS.asalMax);
@@ -358,27 +320,34 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
     setSavingGuest(true);
     try {
-      await updateDoc(doc(db, 'guests', editingGuest.id), {
+      const updated = await adminUpdateGuest(editingGuest.id, {
         nama: cleanNama,
         asal: cleanAsal,
         kategoriAsal: editKategori,
         pesan: cleanPesan,
         status: editStatus,
       });
+      onGuestUpdated(updated);
       setEditingGuest(null);
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `guests/${editingGuest.id}`);
+      setActionError(
+        err instanceof Error ? err.message : 'Gagal menyimpan perubahan data tamu.'
+      );
     } finally {
       setSavingGuest(false);
     }
   };
 
   const handleDeleteGuest = async (guestId: string) => {
+    setActionError(null);
     try {
-      await deleteDoc(doc(db, 'guests', guestId));
+      await adminDeleteGuest(guestId);
+      onGuestDeleted(guestId);
       setConfirmDeleteId(null);
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `guests/${guestId}`);
+      setActionError(
+        err instanceof Error ? err.message : 'Gagal menghapus data tamu.'
+      );
     }
   };
 
@@ -476,7 +445,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!isAuthenticated) return;
     setEventFormError(null);
 
     const cleanHeading = eventHeadingName
@@ -521,32 +490,30 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
     setSavingEvent(true);
     try {
-      if (isCreatingNewEvent) {
-        await setDoc(doc(db, 'events', targetId), {
-          headingName: cleanHeading,
-          bannerImage: cleanBanner,
-          title: cleanTitle,
-          subtitle: cleanSubtitle,
-          location: cleanLocation,
-          isActive: eventIsActive,
-          createdBy: user.uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        await updateDoc(doc(db, 'events', targetId), {
-          headingName: cleanHeading,
-          bannerImage: cleanBanner,
-          title: cleanTitle,
-          subtitle: cleanSubtitle,
-          location: cleanLocation,
-          isActive: eventIsActive,
-          updatedAt: serverTimestamp(),
-        });
-      }
+      const saved = isCreatingNewEvent
+        ? await adminCreateEvent({
+            id: targetId,
+            headingName: cleanHeading,
+            bannerImage: cleanBanner,
+            title: cleanTitle,
+            subtitle: cleanSubtitle,
+            location: cleanLocation,
+            isActive: eventIsActive,
+          })
+        : await adminUpdateEvent(targetId, {
+            headingName: cleanHeading,
+            bannerImage: cleanBanner,
+            title: cleanTitle,
+            subtitle: cleanSubtitle,
+            location: cleanLocation,
+            isActive: eventIsActive,
+          });
+      onEventSaved(saved);
       setShowEventModal(false);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `events/${targetId}`);
+      setEventFormError(
+        err instanceof Error ? err.message : 'Gagal menyimpan pengaturan acara.'
+      );
     } finally {
       setSavingEvent(false);
     }
@@ -565,8 +532,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     );
   }
 
-  // Step 1: Username & Password Login Gate
-  if (!adminGateUnlocked) {
+  // Admin Login Form (Username & Password Only)
+  if (!isAuthenticated) {
     return (
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="max-w-md mx-auto bg-white border border-slate-200 rounded-xl p-8">
@@ -657,115 +624,6 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     );
   }
 
-  // Step 2: Credentials verified, establish Firebase Auth database session if not signed in
-  if (!user) {
-    return (
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="max-w-lg mx-auto bg-white border border-slate-200 rounded-xl p-8">
-          <div className="w-12 h-12 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center mx-auto mb-4">
-            <CheckCircle2 className="w-6 h-6" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-xl font-bold text-slate-900">
-              Kredensial Admin Terverifikasi
-            </h1>
-            <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-              Hubungkan sesi database Firestore dengan akun Google administrator Anda untuk memuat daftar tamu secara real-time.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleLoginClick}
-            disabled={signingIn}
-            className="mt-6 w-full min-h-[46px] px-5 py-2.5 bg-teal-700 text-white text-sm font-semibold rounded-lg hover:bg-teal-800 transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-          >
-            <LogIn className="w-4 h-4" />
-            <span>
-              {signingIn
-                ? 'Menghubungkan Sesi Google...'
-                : 'Hubungkan Sesi Google Admin'}
-            </span>
-          </button>
-
-          <div className="mt-5 border-t border-slate-100 pt-4">
-            <button
-              type="button"
-              onClick={() => setShowConsoleGuide((prev) => !prev)}
-              className="w-full flex items-center justify-between text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
-            >
-              <span>Panduan aktifkan login Email/Password di Firebase Console</span>
-              {showConsoleGuide ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-            {showConsoleGuide && (
-              <ol className="mt-3 space-y-1.5 text-xs text-slate-600 list-decimal list-inside leading-relaxed bg-slate-50 border border-slate-200 rounded-lg p-3.5">
-                <li>
-                  Buka Firebase Console → <strong>Authentication</strong> →{' '}
-                  <strong>Sign-in method</strong>.
-                </li>
-                <li>
-                  Aktifkan provider <strong>Email/Password</strong> dan simpan.
-                </li>
-                <li>
-                  Pada tab <strong>Users</strong>, tambahkan akun{' '}
-                  <span className="font-mono text-slate-800">{ADMIN_VIRTUAL_EMAIL}</span>{' '}
-                  dengan password Anda, lalu salin UID-nya ke koleksi Firestore{' '}
-                  <span className="font-mono text-slate-800">admins/&#123;uid&#125;</span>.
-                </li>
-              </ol>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={onLockAdminGate}
-            className="mt-4 w-full text-xs text-slate-500 hover:text-slate-800 py-1.5 cursor-pointer"
-          >
-            Kembali ke Form Username &amp; Password
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Step 3: Signed in, but not an authorized admin in Firestore
-  if (!isAdmin) {
-    return (
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="max-w-lg mx-auto bg-white border border-slate-200 rounded-xl p-8 text-center">
-          <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center mx-auto mb-4">
-            <ShieldAlert className="w-6 h-6" />
-          </div>
-          <h1 className="text-xl font-bold text-slate-900">Akses Database Terbatas</h1>
-          <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-            Akun <span className="font-semibold text-slate-900">{user.email}</span> (UID:{' '}
-            <span className="font-mono text-xs text-slate-700">{user.uid}</span>) belum terdaftar sebagai administrator pada database ini.
-          </p>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={handleLoginClick}
-              className="min-h-[44px] px-4 py-2 bg-teal-700 text-white text-sm font-medium rounded-lg hover:bg-teal-800 transition-colors cursor-pointer"
-            >
-              Ganti Akun Google
-            </button>
-            <button
-              type="button"
-              onClick={() => void onSignOut()}
-              className="min-h-[44px] px-4 py-2 bg-white border border-slate-300 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
-            >
-              Keluar
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const categoryColors: Record<KategoriAsal, string> = {
     'Instansi / Kantor': 'bg-teal-700',
     'Sekolah / Universitas': 'bg-sky-600',
@@ -789,7 +647,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             Dashboard Monitoring Kehadiran
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Pemantauan data tamu real-time · Masuk sebagai {user.email}
+            Pemantauan data tamu real-time · Masuk sebagai admin
           </p>
         </div>
 
@@ -830,6 +688,20 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Inline Action Error Banner */}
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between gap-4 text-sm text-red-700">
+          <span>{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="p-1 text-red-500 hover:text-red-800 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Real-time New Arrival Notification */}
       {recentArrival && (
@@ -1287,7 +1159,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           <div className="flex items-center gap-4">
             <button
               type="button"
-              onClick={() => void onSignOut()}
+              onClick={() => void onAdminLogout()}
               className="text-slate-600 hover:text-slate-900 inline-flex items-center gap-1.5 font-medium cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
