@@ -8,6 +8,8 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  Timestamp,
+  where,
 } from 'firebase/firestore';
 import { LayoutDashboard, QrCode, ClipboardPen } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from './lib/firebase';
@@ -146,7 +148,11 @@ function GuestbookApp() {
 
     void ensureDefaultEvent();
 
-    const guestsQuery = query(collection(db, 'guests'), orderBy('createdAt', 'desc'));
+    const guestsQuery = query(
+      collection(db, 'guests'),
+      where('createdAt', '>=', Timestamp.fromMillis(0)),
+      orderBy('createdAt', 'desc')
+    );
     const unsubGuests = onSnapshot(
       guestsQuery,
       (snapshot) => {
@@ -195,7 +201,11 @@ function GuestbookApp() {
       }
     );
 
-    const eventsQuery = query(collection(db, 'events'), orderBy('createdAt', 'desc'));
+    const eventsQuery = query(
+      collection(db, 'events'),
+      where('createdAt', '>=', Timestamp.fromMillis(0)),
+      orderBy('createdAt', 'desc')
+    );
     const unsubEvents = onSnapshot(
       eventsQuery,
       (snapshot) => {

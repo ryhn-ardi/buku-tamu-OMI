@@ -553,6 +553,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       return;
     }
 
+    if (isCreatingNewEvent && events.some((ev) => ev.id === targetId)) {
+      setEventFormError(
+        `ID acara "${targetId}" sudah terdaftar. Pilih acara tersebut dari daftar untuk mengeditnya, atau gunakan ID baru.`
+      );
+      return;
+    }
+
     setSavingEvent(true);
     try {
       if (isCreatingNewEvent) {

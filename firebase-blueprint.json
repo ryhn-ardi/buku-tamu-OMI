@@ -14,7 +14,7 @@
         "bannerImage": {
           "type": "string",
           "description": "Banner image path, external HTTPS URL, or compressed base64 data URI",
-          "maxLength": 350000
+          "maxLength": 500000
         },
         "title": {
           "type": "string",

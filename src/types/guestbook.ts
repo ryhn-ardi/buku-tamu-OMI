@@ -77,7 +77,7 @@ export const SCHEMA_LIMITS = {
   pesanMax: 1000,
   headingNameMin: 1,
   headingNameMax: 80,
-  bannerImageMax: 350000,
+  bannerImageMax: 500000,
   eventTitleMin: 2,
   eventTitleMax: 120,
   eventSubtitleMax: 200,

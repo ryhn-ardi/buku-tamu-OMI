@@ -46,7 +46,7 @@ service cloud.firestore {
       return data.keys().hasAll(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'standSlots', 'createdBy', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'standSlots', 'createdBy', 'createdAt', 'updatedAt']) &&
         data.headingName is string && data.headingName.size() >= 1 && data.headingName.size() <= 80 &&
-        data.bannerImage is string && data.bannerImage.size() <= 350000 &&
+        data.bannerImage is string && data.bannerImage.size() <= 500000 &&
         data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
         data.subtitle is string && data.subtitle.size() <= 200 &&
         data.location is string && data.location.size() <= 120 &&
@@ -82,7 +82,7 @@ service cloud.firestore {
     // Events Collection
     match /events/{eventId} {
       allow get: if isValidId(eventId);
-      allow list: if resource.data.title is string && resource.data.isActive is bool;
+      allow list: if resource.data.createdAt >= timestamp.date(1970, 1, 1);
       allow create: if isValidId(eventId) &&
         isValidEvent(incoming()) &&
         incoming().createdAt == request.time &&
@@ -99,7 +99,7 @@ service cloud.firestore {
     // Guests Collection (QR Code Check-in + Admin Live Monitoring)
     match /guests/{guestId} {
       allow get: if isValidId(guestId);
-      allow list: if resource.data.eventId is string && resource.data.nama is string;
+      allow list: if resource.data.createdAt >= timestamp.date(1970, 1, 1);
       allow create: if isValidId(guestId) &&
         isValidGuest(incoming()) &&
         incoming().status == 'hadir' &&
