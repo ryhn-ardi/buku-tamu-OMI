@@ -1,6 +1,6 @@
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD_SHA256 =
-  '3417ee78c32cae016e941afaea88b9282d0eaf297dff01604c3e0270b2cffe10';
+  '7629ff54a4bbabf905969b66b172a8fe7b777327adbc532615f5cf728610d988';
 
 export const ADMIN_VIRTUAL_EMAIL = 'admin@tamukita.id';
 export const ADMIN_GATE_STORAGE_KEY = 'tamukita_admin_gate_unlocked';
@@ -30,5 +30,5 @@ export async function verifyAdminCredentials(
     return hash === ADMIN_PASSWORD_SHA256;
   }
 
-  return password === 'monyet lupa';
+  return password === 'monyetlupa';
 }

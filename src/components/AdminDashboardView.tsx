@@ -97,9 +97,12 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   onOpenKioskForEvent,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchField, setSearchField] = useState<'all' | 'nama' | 'asal' | 'pesan'>('all');
   const [selectedEventFilter, setSelectedEventFilter] = useState<string>('all');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
-  const [dateFilter, setDateFilter] = useState<'all' | 'today'>('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | GuestStatus>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | '7days' | 'specific'>('all');
+  const [specificDate, setSpecificDate] = useState<string>('');
   const [signingIn, setSigningIn] = useState(false);
 
   // Username & Password Login Form states
@@ -195,10 +198,38 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     }
   };
 
+  const toLocalDateKey = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const resetAllFilters = () => {
+    setSearchQuery('');
+    setSearchField('all');
+    setSelectedEventFilter('all');
+    setSelectedCategoryFilter('all');
+    setSelectedStatusFilter('all');
+    setDateFilter('all');
+    setSpecificDate('');
+  };
+
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
+      searchField !== 'all' ||
+      selectedEventFilter !== 'all' ||
+      selectedCategoryFilter !== 'all' ||
+      selectedStatusFilter !== 'all' ||
+      dateFilter !== 'all'
+  );
+
   // Filtered guests
   const filteredGuests = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    const todayStr = new Date().toDateString();
+    const now = new Date();
+    const todayKey = toLocalDateKey(now);
+    const sevenDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
 
     return guests.filter((g) => {
       if (selectedEventFilter !== 'all' && g.eventId !== selectedEventFilter) {
@@ -207,11 +238,32 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       if (selectedCategoryFilter !== 'all' && g.kategoriAsal !== selectedCategoryFilter) {
         return false;
       }
-      if (dateFilter === 'today') {
+      if (selectedStatusFilter !== 'all' && g.status !== selectedStatusFilter) {
+        return false;
+      }
+      if (dateFilter !== 'all') {
         if (!g.createdAt) return false;
-        if (g.createdAt.toDate().toDateString() !== todayStr) return false;
+        const guestDate = g.createdAt.toDate();
+        if (dateFilter === 'today' && toLocalDateKey(guestDate) !== todayKey) {
+          return false;
+        }
+        if (dateFilter === '7days' && guestDate < sevenDaysAgo) {
+          return false;
+        }
+        if (dateFilter === 'specific' && specificDate) {
+          if (toLocalDateKey(guestDate) !== specificDate) return false;
+        }
       }
       if (q) {
+        if (searchField === 'nama') {
+          return g.nama.toLowerCase().includes(q);
+        }
+        if (searchField === 'asal') {
+          return g.asal.toLowerCase().includes(q);
+        }
+        if (searchField === 'pesan') {
+          return g.pesan.toLowerCase().includes(q);
+        }
         const matchNama = g.nama.toLowerCase().includes(q);
         const matchAsal = g.asal.toLowerCase().includes(q);
         const matchPesan = g.pesan.toLowerCase().includes(q);
@@ -219,7 +271,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       }
       return true;
     });
-  }, [guests, searchQuery, selectedEventFilter, selectedCategoryFilter, dateFilter]);
+  }, [
+    guests,
+    searchQuery,
+    searchField,
+    selectedEventFilter,
+    selectedCategoryFilter,
+    selectedStatusFilter,
+    dateFilter,
+    specificDate,
+  ]);
 
   // Real KPI stats computed from Firestore documents
   const kpiStats = useMemo(() => {
@@ -868,16 +929,52 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       {/* Search, Filters & High-Density Guest Table */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="p-4 sm:p-5 border-b border-slate-200 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Cari nama tamu, asal instansi/daerah, atau pesan kesan..."
-                className="w-full min-h-[42px] pl-10 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
-              />
+          {/* Row 1: Specific Search & Secondary Dropdowns */}
+          <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+            <div className="flex-1 flex flex-col sm:flex-row gap-2">
+              <select
+                aria-label="Target Pencarian"
+                value={searchField}
+                onChange={(e) =>
+                  setSearchField(e.target.value as 'all' | 'nama' | 'asal' | 'pesan')
+                }
+                className="min-h-[42px] px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700 shrink-0"
+              >
+                <option value="all">Semua Kolom</option>
+                <option value="nama">Khusus Nama Tamu</option>
+                <option value="asal">Khusus Asal / Instansi</option>
+                <option value="pesan">Khusus Pesan &amp; Kesan</option>
+              </select>
+
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  aria-label="Cari Data Tamu"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={
+                    searchField === 'nama'
+                      ? 'Ketik nama lengkap tamu secara spesifik...'
+                      : searchField === 'asal'
+                      ? 'Ketik asal daerah, sekolah, atau instansi...'
+                      : searchField === 'pesan'
+                      ? 'Cari kata kunci pada pesan dan kesan...'
+                      : 'Cari nama tamu, asal instansi/daerah, atau pesan kesan...'
+                  }
+                  className="w-full min-h-[42px] pl-10 pr-9 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    aria-label="Hapus pencarian"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
@@ -896,61 +993,132 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 ))}
               </select>
 
+              <select
+                aria-label="Filter Status Kehadiran"
+                value={selectedStatusFilter}
+                onChange={(e) =>
+                  setSelectedStatusFilter(e.target.value as 'all' | GuestStatus)
+                }
+                className="min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
+              >
+                <option value="all">Semua Status</option>
+                <option value="hadir">Hadir</option>
+                <option value="terverifikasi">Terverifikasi</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Row 2: Arrival Date Filters & Category Segmented Controls */}
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            {/* Segmented Category Filter */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0">
+              <button
+                type="button"
+                onClick={() => setSelectedCategoryFilter('all')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  selectedCategoryFilter === 'all'
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                Semua Kategori · <span className="font-mono tabular-nums">{kpiStats.total}</span>
+              </button>
+              {KATEGORI_ASAL_OPTIONS.map((kat) => {
+                const katCount =
+                  kpiStats.byCategory.find((b) => b.kategori === kat)?.count ?? 0;
+                return (
+                  <button
+                    key={kat}
+                    type="button"
+                    onClick={() => setSelectedCategoryFilter(kat)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                      selectedCategoryFilter === kat
+                        ? 'bg-slate-900 border-slate-900 text-white'
+                        : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    {kat} · <span className="font-mono tabular-nums">{katCount}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Arrival Date Filter Controls */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <div className="inline-flex items-center p-1 bg-slate-100 rounded-lg">
                 <button
                   type="button"
-                  onClick={() => setDateFilter('all')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                  onClick={() => {
+                    setDateFilter('all');
+                    setSpecificDate('');
+                  }}
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
                     dateFilter === 'all'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Semua Waktu
+                  Semua Tanggal
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDateFilter('today')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                  onClick={() => {
+                    setDateFilter('today');
+                    setSpecificDate('');
+                  }}
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
                     dateFilter === 'today'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>Hari Ini</span>
+                  Hari Ini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDateFilter('7days');
+                    setSpecificDate('');
+                  }}
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                    dateFilter === '7days'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  7 Hari
                 </button>
               </div>
-            </div>
-          </div>
 
-          {/* Segmented Category Filter */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            <button
-              type="button"
-              onClick={() => setSelectedCategoryFilter('all')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                selectedCategoryFilter === 'all'
-                  ? 'bg-slate-900 border-slate-900 text-white'
-                  : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-              }`}
-            >
-              Semua Kategori
-            </button>
-            {KATEGORI_ASAL_OPTIONS.map((kat) => (
-              <button
-                key={kat}
-                type="button"
-                onClick={() => setSelectedCategoryFilter(kat)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  selectedCategoryFilter === kat
-                    ? 'bg-slate-900 border-slate-900 text-white'
-                    : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                {kat}
-              </button>
-            ))}
+              <div className="relative flex items-center">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
+                <input
+                  type="date"
+                  aria-label="Filter Tanggal Kedatangan Spesifik"
+                  value={specificDate}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSpecificDate(val);
+                    setDateFilter(val ? 'specific' : 'all');
+                  }}
+                  className={`min-h-[36px] pl-8 pr-2.5 py-1 border rounded-lg text-xs font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700 ${
+                    dateFilter === 'specific' && specificDate
+                      ? 'bg-teal-50 border-teal-700 text-teal-900 font-semibold'
+                      : 'bg-white border-slate-300 text-slate-700'
+                  }`}
+                />
+              </div>
+
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={resetAllFilters}
+                  className="min-h-[36px] px-3 py-1 bg-white border border-slate-300 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Reset Filter
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -994,12 +1162,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               ) : (
                 <button
                   type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setSelectedEventFilter('all');
-                    setSelectedCategoryFilter('all');
-                    setDateFilter('all');
-                  }}
+                  onClick={resetAllFilters}
                   className="min-h-[42px] px-4 py-2 bg-white border border-slate-300 text-slate-800 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
                 >
                   Reset Semua Filter
