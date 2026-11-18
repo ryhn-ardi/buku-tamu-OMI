@@ -15,6 +15,7 @@ import {
   MessageSquareText,
   Send,
   Sparkles,
+  Store,
   User,
   Users,
   XCircle,
@@ -24,7 +25,10 @@ import {
   DEFAULT_BANNER_IMAGE,
   DEFAULT_EVENT_FALLBACK,
   DEFAULT_EVENT_ID,
+  DEFAULT_STAND_SLOTS,
+  getActiveStands,
   KATEGORI_ASAL_OPTIONS,
+  normalizeStandSlots,
   SCHEMA_LIMITS,
   type GuestbookEvent,
   type KategoriAsal,
@@ -42,6 +46,7 @@ interface SubmittedReceipt {
   nama: string;
   asal: string;
   kategoriAsal: KategoriAsal;
+  stand: string;
   pesan: string;
   submittedAt: string;
 }
@@ -57,7 +62,14 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
   const [eventInfo, setEventInfo] = useState<
     Pick<
       GuestbookEvent,
-      'id' | 'headingName' | 'bannerImage' | 'title' | 'subtitle' | 'location' | 'isActive'
+      | 'id'
+      | 'headingName'
+      | 'bannerImage'
+      | 'title'
+      | 'subtitle'
+      | 'location'
+      | 'isActive'
+      | 'standSlots'
     >
   >({
     id: safeEventId,
@@ -67,6 +79,7 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
     subtitle: DEFAULT_EVENT_FALLBACK.subtitle,
     location: DEFAULT_EVENT_FALLBACK.location,
     isActive: true,
+    standSlots: [...DEFAULT_STAND_SLOTS],
   });
   const [loadingEvent, setLoadingEvent] = useState(true);
   const [bannerError, setBannerError] = useState(false);
@@ -74,6 +87,10 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
   const [nama, setNama] = useState('');
   const [asal, setAsal] = useState('');
   const [kategoriAsal, setKategoriAsal] = useState<KategoriAsal>('Instansi / Kantor');
+  const [selectedStand, setSelectedStand] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return new URLSearchParams(window.location.search).get('stand')?.trim() || '';
+  });
   const [pesan, setPesan] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -100,6 +117,7 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
             subtitle: String(data.subtitle || DEFAULT_EVENT_FALLBACK.subtitle),
             location: String(data.location || DEFAULT_EVENT_FALLBACK.location),
             isActive: typeof data.isActive === 'boolean' ? data.isActive : true,
+            standSlots: normalizeStandSlots(data.standSlots),
           });
           setBannerError(false);
           onHeadingSync?.(headingName);
@@ -112,6 +130,7 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
             subtitle: DEFAULT_EVENT_FALLBACK.subtitle,
             location: DEFAULT_EVENT_FALLBACK.location,
             isActive: true,
+            standSlots: [...DEFAULT_STAND_SLOTS],
           });
           setBannerError(false);
           onHeadingSync?.(DEFAULT_EVENT_FALLBACK.headingName);
@@ -124,6 +143,7 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
             subtitle: 'Tautan QR Code acara ini belum terdaftar atau telah dihapus.',
             location: '-',
             isActive: false,
+            standSlots: [...DEFAULT_STAND_SLOTS],
           });
         }
         setLoadingEvent(false);
@@ -136,6 +156,21 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
 
     return () => unsub();
   }, [safeEventId, onHeadingSync]);
+
+  const activeStands = getActiveStands(eventInfo.standSlots);
+
+  useEffect(() => {
+    if (activeStands.length === 0) {
+      if (selectedStand) setSelectedStand('');
+      return;
+    }
+    if (selectedStand && !activeStands.includes(selectedStand)) {
+      const ciMatch = activeStands.find(
+        (s) => s.toLowerCase() === selectedStand.toLowerCase()
+      );
+      setSelectedStand(ciMatch || '');
+    }
+  }, [activeStands, selectedStand]);
 
   const checkInUrl =
     typeof window !== 'undefined'
@@ -166,10 +201,18 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
 
     const cleanNama = nama.trim().slice(0, SCHEMA_LIMITS.namaMax);
     const cleanAsal = asal.trim().slice(0, SCHEMA_LIMITS.asalMax);
+    const cleanStand =
+      activeStands.length > 0
+        ? selectedStand.trim().slice(0, SCHEMA_LIMITS.standMax)
+        : '';
     const cleanPesan = pesan.trim().slice(0, SCHEMA_LIMITS.pesanMax);
 
     if (cleanNama.length < SCHEMA_LIMITS.namaMin) {
       setFormError(`Nama lengkap minimal ${SCHEMA_LIMITS.namaMin} karakter.`);
+      return;
+    }
+    if (activeStands.length > 0 && !activeStands.includes(cleanStand)) {
+      setFormError('Silakan pilih stand expo yang Anda kunjungi.');
       return;
     }
     if (cleanAsal.length < SCHEMA_LIMITS.asalMin) {
@@ -191,6 +234,7 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
         nama: cleanNama,
         asal: cleanAsal,
         kategoriAsal,
+        stand: cleanStand,
         pesan: cleanPesan,
         status: 'hadir',
         createdAt: serverTimestamp(),
@@ -209,11 +253,13 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
         nama: cleanNama,
         asal: cleanAsal,
         kategoriAsal,
+        stand: cleanStand,
         pesan: cleanPesan,
         submittedAt: nowStr,
       });
       setNama('');
       setAsal('');
+      setSelectedStand('');
       setPesan('');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -335,6 +381,14 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
                     {receipt.asal} · <span className="text-slate-500 font-normal">{receipt.kategoriAsal}</span>
                   </span>
                 </div>
+                {receipt.stand && (
+                  <div className="px-4 py-3 flex items-center justify-between gap-4 text-sm">
+                    <span className="text-slate-500">Stand Dikunjungi</span>
+                    <span className="font-semibold text-teal-800 text-right">
+                      {receipt.stand}
+                    </span>
+                  </div>
+                )}
                 <div className="px-4 py-3 text-sm">
                   <span className="text-slate-500 block mb-1">Pesan dan Kesan</span>
                   <p className="text-slate-800 leading-relaxed">&ldquo;{receipt.pesan}&rdquo;</p>
@@ -408,6 +462,37 @@ export const GuestCheckInView: React.FC<GuestCheckInViewProps> = ({
                   />
                 </div>
               </div>
+
+              {activeStands.length > 0 && (
+                <div>
+                  <span className="block text-sm font-medium text-slate-800 mb-2">
+                    Stand yang Dikunjungi <span className="text-red-600">*</span>
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {activeStands.map((standName) => {
+                      const active = selectedStand === standName;
+                      return (
+                        <button
+                          key={standName}
+                          type="button"
+                          disabled={!eventInfo.isActive || submitting}
+                          onClick={() => setSelectedStand(standName)}
+                          className={`min-h-[44px] px-3.5 py-2.5 rounded-lg border text-sm font-medium flex items-center gap-2.5 text-left transition-colors cursor-pointer disabled:opacity-50 ${
+                            active
+                              ? 'bg-teal-50 border-teal-700 text-teal-900'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className={active ? 'text-teal-700' : 'text-slate-400'}>
+                            <Store className="w-4 h-4 shrink-0" />
+                          </span>
+                          <span className="truncate">{standName}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <span className="block text-sm font-medium text-slate-800 mb-2">

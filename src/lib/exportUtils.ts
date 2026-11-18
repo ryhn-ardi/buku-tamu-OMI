@@ -44,6 +44,7 @@ export function exportGuestsToExcel(guests: GuestEntry[], eventTitle: string): v
     'Nama Lengkap': guest.nama,
     'Kategori Asal': guest.kategoriAsal,
     'Asal Daerah / Instansi / Sekolah / Kantor': guest.asal,
+    'Stand Dikunjungi': guest.stand || '-',
     'Pesan dan Kesan': guest.pesan,
     Status: guest.status === 'terverifikasi' ? 'Terverifikasi' : 'Hadir',
     'ID Acara': guest.eventId,
@@ -56,7 +57,8 @@ export function exportGuestsToExcel(guests: GuestEntry[], eventTitle: string): v
     { wch: 26 },
     { wch: 22 },
     { wch: 34 },
-    { wch: 48 },
+    { wch: 24 },
+    { wch: 46 },
     { wch: 15 },
     { wch: 18 },
   ];
@@ -106,6 +108,7 @@ export function exportGuestsToPdf(
     formatGuestTimestamp(guest.createdAt),
     guest.nama,
     `${guest.asal}\n(${guest.kategoriAsal})`,
+    guest.stand || '-',
     guest.pesan,
     guest.status === 'terverifikasi' ? 'Terverifikasi' : 'Hadir',
   ]);
@@ -117,6 +120,7 @@ export function exportGuestsToPdf(
       'Waktu Hadir',
       'Nama Lengkap',
       'Asal Daerah / Instansi / Sekolah / Kantor',
+      'Stand Dikunjungi',
       'Pesan dan Kesan',
       'Status',
     ]],
@@ -141,11 +145,12 @@ export function exportGuestsToPdf(
     },
     columnStyles: {
       0: { cellWidth: 10, halign: 'center' },
-      1: { cellWidth: 34 },
-      2: { cellWidth: 44 },
-      3: { cellWidth: 58 },
-      4: { cellWidth: 'auto' },
-      5: { cellWidth: 26, halign: 'center' },
+      1: { cellWidth: 32 },
+      2: { cellWidth: 40 },
+      3: { cellWidth: 50 },
+      4: { cellWidth: 34 },
+      5: { cellWidth: 'auto' },
+      6: { cellWidth: 24, halign: 'center' },
     },
     didDrawPage: (data) => {
       const pageCount = doc.getNumberOfPages();

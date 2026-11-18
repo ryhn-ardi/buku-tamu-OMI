@@ -25,6 +25,7 @@ import {
   QrCode,
   Search,
   Settings2,
+  Store,
   Trash2,
   Upload,
   User as UserIcon,
@@ -43,8 +44,12 @@ import {
   DEFAULT_BANNER_IMAGE,
   DEFAULT_EVENT_FALLBACK,
   DEFAULT_EVENT_ID,
+  DEFAULT_STAND_SLOTS,
+  getActiveStands,
   KATEGORI_ASAL_OPTIONS,
+  normalizeStandSlots,
   SCHEMA_LIMITS,
+  STAND_SLOT_COUNT,
   type GuestbookEvent,
   type GuestEntry,
   type GuestStatus,
@@ -80,6 +85,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [searchField, setSearchField] = useState<'all' | 'nama' | 'asal' | 'pesan'>('all');
   const [selectedEventFilter, setSelectedEventFilter] = useState<string>('all');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [selectedStandFilter, setSelectedStandFilter] = useState<string>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | GuestStatus>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | '7days' | 'specific'>('all');
   const [specificDate, setSpecificDate] = useState<string>('');
@@ -98,6 +104,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [editNama, setEditNama] = useState('');
   const [editAsal, setEditAsal] = useState('');
   const [editKategori, setEditKategori] = useState<KategoriAsal>('Instansi / Kantor');
+  const [editStand, setEditStand] = useState('');
   const [editPesan, setEditPesan] = useState('');
   const [editStatus, setEditStatus] = useState<GuestStatus>('hadir');
   const [savingGuest, setSavingGuest] = useState(false);
@@ -118,6 +125,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [eventTitle, setEventTitle] = useState('');
   const [eventSubtitle, setEventSubtitle] = useState('');
   const [eventLocation, setEventLocation] = useState('');
+  const [eventStandSlots, setEventStandSlots] = useState<string[]>([
+    ...DEFAULT_STAND_SLOTS,
+  ]);
   const [eventIsActive, setEventIsActive] = useState(true);
   const [eventFormError, setEventFormError] = useState<string | null>(null);
   const [savingEvent, setSavingEvent] = useState(false);
@@ -160,6 +170,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     setSearchField('all');
     setSelectedEventFilter('all');
     setSelectedCategoryFilter('all');
+    setSelectedStandFilter('all');
     setSelectedStatusFilter('all');
     setDateFilter('all');
     setSpecificDate('');
@@ -170,9 +181,45 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       searchField !== 'all' ||
       selectedEventFilter !== 'all' ||
       selectedCategoryFilter !== 'all' ||
+      selectedStandFilter !== 'all' ||
       selectedStatusFilter !== 'all' ||
       dateFilter !== 'all'
   );
+
+  // Collect all configured stand names + any recorded guest stand names
+  const availableStands = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    const relevantEvents =
+      selectedEventFilter === 'all'
+        ? events
+        : events.filter((ev) => ev.id === selectedEventFilter);
+
+    for (const ev of relevantEvents) {
+      for (const s of getActiveStands(ev.standSlots)) {
+        const key = s.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          list.push(s);
+        }
+      }
+    }
+
+    const relevantGuests =
+      selectedEventFilter === 'all'
+        ? guests
+        : guests.filter((g) => g.eventId === selectedEventFilter);
+
+    for (const g of relevantGuests) {
+      const clean = g.stand.trim();
+      if (clean && !seen.has(clean.toLowerCase())) {
+        seen.add(clean.toLowerCase());
+        list.push(clean);
+      }
+    }
+
+    return list;
+  }, [events, guests, selectedEventFilter]);
 
   // Filtered guests
   const filteredGuests = useMemo(() => {
@@ -187,6 +234,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       }
       if (selectedCategoryFilter !== 'all' && g.kategoriAsal !== selectedCategoryFilter) {
         return false;
+      }
+      if (selectedStandFilter !== 'all') {
+        if (selectedStandFilter === '__none__') {
+          if (g.stand.trim() !== '') return false;
+        } else if (g.stand.trim() !== selectedStandFilter) {
+          return false;
+        }
       }
       if (selectedStatusFilter !== 'all' && g.status !== selectedStatusFilter) {
         return false;
@@ -216,8 +270,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         }
         const matchNama = g.nama.toLowerCase().includes(q);
         const matchAsal = g.asal.toLowerCase().includes(q);
+        const matchStand = g.stand.toLowerCase().includes(q);
         const matchPesan = g.pesan.toLowerCase().includes(q);
-        if (!matchNama && !matchAsal && !matchPesan) return false;
+        if (!matchNama && !matchAsal && !matchStand && !matchPesan) return false;
       }
       return true;
     });
@@ -227,6 +282,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     searchField,
     selectedEventFilter,
     selectedCategoryFilter,
+    selectedStandFilter,
     selectedStatusFilter,
     dateFilter,
     specificDate,
@@ -256,14 +312,20 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       count: baseList.filter((g) => g.kategoriAsal === kat).length,
     }));
 
+    const byStand = availableStands.map((standName) => ({
+      stand: standName,
+      count: baseList.filter((g) => g.stand.trim() === standName).length,
+    }));
+
     return {
       total: baseList.length,
       todayCount,
       verifiedCount,
       uniqueOrigins,
       byCategory,
+      byStand,
     };
-  }, [guests, selectedEventFilter]);
+  }, [guests, selectedEventFilter, availableStands]);
 
   const activeExportEvent = useMemo(() => {
     if (selectedEventFilter !== 'all') {
@@ -293,6 +355,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     setEditNama(guest.nama);
     setEditAsal(guest.asal);
     setEditKategori(guest.kategoriAsal);
+    setEditStand(guest.stand || '');
     setEditPesan(guest.pesan);
     setEditStatus(guest.status);
   };
@@ -304,6 +367,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
     const cleanNama = editNama.trim().slice(0, SCHEMA_LIMITS.namaMax);
     const cleanAsal = editAsal.trim().slice(0, SCHEMA_LIMITS.asalMax);
+    const cleanStand = editStand.trim().slice(0, SCHEMA_LIMITS.standMax);
     const cleanPesan = editPesan.trim().slice(0, SCHEMA_LIMITS.pesanMax);
     if (
       cleanNama.length < SCHEMA_LIMITS.namaMin ||
@@ -319,6 +383,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         nama: cleanNama,
         asal: cleanAsal,
         kategoriAsal: editKategori,
+        stand: cleanStand,
         pesan: cleanPesan,
         status: editStatus,
       });
@@ -372,6 +437,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       setEventTitle(chosen.title);
       setEventSubtitle(chosen.subtitle);
       setEventLocation(chosen.location);
+      setEventStandSlots(normalizeStandSlots(chosen.standSlots));
       setEventIsActive(chosen.isActive);
     } else {
       setIsCreatingNewEvent(true);
@@ -382,6 +448,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       setEventTitle('Buku Tamu Digital');
       setEventSubtitle('Silakan pindai QR Code dan isi identitas kehadiran Anda.');
       setEventLocation('Lobi Utama');
+      setEventStandSlots([...DEFAULT_STAND_SLOTS]);
       setEventIsActive(true);
     }
     setShowEventModal(true);
@@ -399,6 +466,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       setEventTitle('');
       setEventSubtitle('Silakan pindai QR Code dan isi identitas kehadiran Anda.');
       setEventLocation('');
+      setEventStandSlots([...DEFAULT_STAND_SLOTS]);
       setEventIsActive(true);
       return;
     }
@@ -413,6 +481,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       setEventTitle(found.title);
       setEventSubtitle(found.subtitle);
       setEventLocation(found.location);
+      setEventStandSlots(normalizeStandSlots(found.standSlots));
       setEventIsActive(found.isActive);
     }
   };
@@ -450,6 +519,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     const cleanTitle = eventTitle.trim().slice(0, SCHEMA_LIMITS.eventTitleMax);
     const cleanSubtitle = eventSubtitle.trim().slice(0, SCHEMA_LIMITS.eventSubtitleMax);
     const cleanLocation = eventLocation.trim().slice(0, SCHEMA_LIMITS.eventLocationMax);
+    const cleanStandSlots = normalizeStandSlots(eventStandSlots);
 
     if (cleanHeading.length < SCHEMA_LIMITS.headingNameMin) {
       setEventFormError(`Nama heading minimal ${SCHEMA_LIMITS.headingNameMin} karakter.`);
@@ -493,6 +563,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           subtitle: cleanSubtitle,
           location: cleanLocation,
           isActive: eventIsActive,
+          standSlots: cleanStandSlots,
           createdBy: 'admin',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -505,6 +576,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           subtitle: cleanSubtitle,
           location: cleanLocation,
           isActive: eventIsActive,
+          standSlots: cleanStandSlots,
           updatedAt: serverTimestamp(),
         });
       }
@@ -658,7 +730,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             className="min-h-[42px] px-4 py-2 bg-white border border-slate-300 text-slate-800 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors inline-flex items-center gap-2 cursor-pointer whitespace-nowrap"
           >
             <Settings2 className="w-4 h-4 text-teal-700" />
-            <span>Ubah Heading &amp; Gambar</span>
+            <span>Atur Heading, Stand &amp; Gambar</span>
           </button>
 
           <button
@@ -711,6 +783,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             <p className="text-sm text-teal-950 truncate">
               <span className="font-semibold">Tamu Baru Hadir:</span> {recentArrival.nama} ·{' '}
               <span className="text-teal-800">{recentArrival.asal}</span>
+              {recentArrival.stand ? ` · ${recentArrival.stand}` : ''}
             </p>
           </div>
           <span className="text-xs font-mono text-teal-800 tabular-nums shrink-0">
@@ -796,6 +869,48 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </div>
           ))}
         </div>
+
+        {kpiStats.byStand.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <div className="flex items-center justify-between gap-2 mb-2.5">
+              <h3 className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                <Store className="w-3.5 h-3.5 text-teal-700" />
+                <span>Kunjungan per Stand Expo</span>
+              </h3>
+              <span className="text-[11px] text-slate-500">
+                Klik stand untuk menyaring tabel
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {kpiStats.byStand.map((item) => {
+                const isSelected = selectedStandFilter === item.stand;
+                return (
+                  <button
+                    key={item.stand}
+                    type="button"
+                    onClick={() =>
+                      setSelectedStandFilter(isSelected ? 'all' : item.stand)
+                    }
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-medium inline-flex items-center gap-2 transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-teal-700 border-teal-700 text-white'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>{item.stand}</span>
+                    <span
+                      className={`font-mono font-semibold tabular-nums ${
+                        isSelected ? 'text-teal-100' : 'text-slate-900'
+                      }`}
+                    >
+                      {item.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Search, Filters & High-Density Guest Table */}
@@ -850,6 +965,21 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
+              <select
+                aria-label="Filter Stand Dikunjungi"
+                value={selectedStandFilter}
+                onChange={(e) => setSelectedStandFilter(e.target.value)}
+                className="min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
+              >
+                <option value="all">Semua Stand Expo</option>
+                {availableStands.map((standName) => (
+                  <option key={standName} value={standName}>
+                    {standName}
+                  </option>
+                ))}
+                <option value="__none__">Tanpa Pilihan Stand</option>
+              </select>
+
               <select
                 aria-label="Filter Acara"
                 value={selectedEventFilter}
@@ -1051,6 +1181,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   <th className="py-3 px-3 whitespace-nowrap">Waktu Hadir</th>
                   <th className="py-3 px-3">Nama Tamu</th>
                   <th className="py-3 px-3">Asal Daerah / Instansi</th>
+                  <th className="py-3 px-3 whitespace-nowrap">Stand Dikunjungi</th>
                   <th className="py-3 px-3">Pesan &amp; Kesan</th>
                   <th className="py-3 px-3 whitespace-nowrap">Status</th>
                   <th className="py-3 pl-3 pr-5 text-right whitespace-nowrap">Aksi</th>
@@ -1076,6 +1207,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       <div className="text-xs text-slate-500 mt-0.5">
                         {guest.kategoriAsal}
                       </div>
+                    </td>
+                    <td className="py-3 px-3 align-top whitespace-nowrap">
+                      {guest.stand ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-teal-50 border border-teal-200 text-xs font-medium text-teal-900">
+                          <Store className="w-3 h-3 text-teal-700 shrink-0" />
+                          <span>{guest.stand}</span>
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">-</span>
+                      )}
                     </td>
                     <td className="py-3 px-3 text-slate-600 align-top max-w-xs">
                       <p className="line-clamp-2 leading-relaxed">{guest.pesan}</p>
@@ -1201,6 +1342,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 </span>
               </div>
               <div>
+                <span className="text-xs text-slate-500 block">
+                  Stand yang Dikunjungi
+                </span>
+                <span className="font-medium text-slate-900">
+                  {viewingGuest.stand || '-'}
+                </span>
+              </div>
+              <div>
                 <span className="text-xs text-slate-500 block mb-1">Pesan dan Kesan</span>
                 <p className="text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-3.5 leading-relaxed">
                   {viewingGuest.pesan}
@@ -1310,6 +1459,38 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 onChange={(e) => setEditAsal(e.target.value)}
                 className="w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Stand yang Dikunjungi (Opsional)
+              </label>
+              {availableStands.length > 0 ? (
+                <select
+                  value={editStand}
+                  onChange={(e) => setEditStand(e.target.value)}
+                  className="w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900"
+                >
+                  <option value="">Tidak ada / Umum</option>
+                  {availableStands.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                  {editStand && !availableStands.includes(editStand) && (
+                    <option value={editStand}>{editStand}</option>
+                  )}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  maxLength={SCHEMA_LIMITS.standMax}
+                  value={editStand}
+                  onChange={(e) => setEditStand(e.target.value)}
+                  placeholder="Kosongkan jika tidak ada stand"
+                  className="w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
+                />
+              )}
             </div>
 
             <div>
@@ -1497,6 +1678,80 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   placeholder="Contoh: Buku Tamu Kunjungan Kerja"
                   className="w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
                 />
+              </div>
+            </div>
+
+            {/* 5 Custom Expo Stand Slots */}
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-900 flex items-center gap-1.5">
+                    <Store className="w-3.5 h-3.5 text-teal-700" />
+                    <span>Slot Stand Expo ({STAND_SLOT_COUNT} Slot Kustom)</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Isi nama stand yang ingin ditampilkan di formulir QR tamu (misal 2 stand expo). Slot yang kosong tidak akan ditampilkan.
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-semibold text-teal-700 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-md tabular-nums">
+                  {getActiveStands(eventStandSlots).length} / {STAND_SLOT_COUNT} Aktif
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {Array.from({ length: STAND_SLOT_COUNT }, (_, idx) => {
+                  const val = eventStandSlots[idx] ?? '';
+                  return (
+                    <div key={idx} className="relative">
+                      <label
+                        htmlFor={`stand-slot-${idx}`}
+                        className="block text-[11px] font-medium text-slate-600 mb-1"
+                      >
+                        Slot Stand {idx + 1}
+                      </label>
+                      <div className="relative">
+                        <input
+                          id={`stand-slot-${idx}`}
+                          type="text"
+                          maxLength={SCHEMA_LIMITS.standMax}
+                          value={val}
+                          onChange={(e) => {
+                            const nextVal = e.target.value;
+                            setEventStandSlots((prev) => {
+                              const copy = normalizeStandSlots(prev);
+                              copy[idx] = nextVal;
+                              return copy;
+                            });
+                          }}
+                          placeholder={
+                            idx === 0
+                              ? 'Contoh: Stand 1 - Pendaftaran'
+                              : idx === 1
+                              ? 'Contoh: Stand 2 - Informasi'
+                              : `Kosongkan jika belum dipakai (Slot ${idx + 1})`
+                          }
+                          className="w-full min-h-[40px] pl-3 pr-8 py-1.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
+                        />
+                        {val && (
+                          <button
+                            type="button"
+                            aria-label={`Kosongkan Slot Stand ${idx + 1}`}
+                            onClick={() => {
+                              setEventStandSlots((prev) => {
+                                const copy = normalizeStandSlots(prev);
+                                copy[idx] = '';
+                                return copy;
+                              });
+                            }}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 

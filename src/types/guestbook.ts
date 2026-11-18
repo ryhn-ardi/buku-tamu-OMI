@@ -61,6 +61,10 @@ export const GUEST_STATUS_OPTIONS: readonly GuestStatus[] = [
   'terverifikasi',
 ] as const;
 
+export const STAND_SLOT_COUNT = 5;
+
+export const DEFAULT_STAND_SLOTS: readonly string[] = ['', '', '', '', ''];
+
 export const SCHEMA_LIMITS = {
   idPattern: /^[a-zA-Z0-9_-]+$/,
   idMax: 128,
@@ -68,6 +72,7 @@ export const SCHEMA_LIMITS = {
   namaMax: 100,
   asalMin: 2,
   asalMax: 150,
+  standMax: 80,
   pesanMin: 2,
   pesanMax: 1000,
   headingNameMin: 1,
@@ -79,12 +84,35 @@ export const SCHEMA_LIMITS = {
   eventLocationMax: 120,
 } as const;
 
+export function normalizeStandSlots(raw?: unknown): string[] {
+  const arr = Array.isArray(raw) ? raw : [];
+  return Array.from({ length: STAND_SLOT_COUNT }, (_, idx) => {
+    const val = arr[idx];
+    return typeof val === 'string' ? val.trim().slice(0, SCHEMA_LIMITS.standMax) : '';
+  });
+}
+
+export function getActiveStands(standSlots?: readonly string[]): string[] {
+  if (!Array.isArray(standSlots)) return [];
+  const seen = new Set<string>();
+  const active: string[] = [];
+  for (const raw of standSlots) {
+    const clean = typeof raw === 'string' ? raw.trim().slice(0, SCHEMA_LIMITS.standMax) : '';
+    if (clean && !seen.has(clean.toLowerCase())) {
+      seen.add(clean.toLowerCase());
+      active.push(clean);
+    }
+  }
+  return active;
+}
+
 export interface GuestEntry {
   id: string;
   eventId: string;
   nama: string;
   asal: string;
   kategoriAsal: KategoriAsal;
+  stand: string;
   pesan: string;
   status: GuestStatus;
   createdAt: Timestamp | null;
@@ -98,6 +126,7 @@ export interface GuestbookEvent {
   subtitle: string;
   location: string;
   isActive: boolean;
+  standSlots: string[];
   createdBy: string;
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
@@ -123,4 +152,5 @@ export const DEFAULT_EVENT_FALLBACK: Omit<
     'Silakan pindai QR Code atau lengkapi formulir di samping untuk mencatat kehadiran Anda.',
   location: 'Lobi Utama Resepsionis',
   isActive: true,
+  standSlots: [...DEFAULT_STAND_SLOTS],
 };

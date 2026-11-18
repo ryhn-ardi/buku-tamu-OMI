@@ -2,10 +2,10 @@
 
 ## 1. Data Invariants
 1. A `GuestEntry` in `/guests/{guestId}` MUST have a valid alphanumeric/dash/underscore `guestId` and `eventId`.
-2. Guests submitting via QR code may create a `GuestEntry` only with `status == 'hadir'`, `createdAt == request.time`, bounded field lengths (`nama` 2–100, `asal` 2–150, `pesan` 2–1000), and valid `kategoriAsal` enum.
+2. Guests submitting via QR code may create a `GuestEntry` only with `status == 'hadir'`, `createdAt == request.time`, bounded field lengths (`nama` 2–100, `asal` 2–150, `pesan` 2–1000, optional `stand` <= 80), and valid `kategoriAsal` enum.
 3. If the referenced `/events/{eventId}` exists, it MUST have `isActive == true` for a guest submission to succeed. Non-default event IDs MUST exist in `/events/{eventId}`.
-4. Updates to `/guests/{guestId}` MUST preserve immutable fields (`createdAt`, `eventId`), enforce valid schema bounds, and restrict mutations via `affectedKeys().hasOnly(['nama', 'asal', 'kategoriAsal', 'pesan', 'status'])`.
-5. Creating and updating `/events/{eventId}` MUST enforce valid schema bounds (`headingName` 1–80, `bannerImage <= 350000`, `title` 2–120), preserve `createdBy` and `createdAt`, set `updatedAt == request.time`, and restrict mutations via `affectedKeys().hasOnly(...)`. Deleting events remains restricted to `isAdmin()` and cannot delete `main-guestbook`.
+4. Updates to `/guests/{guestId}` MUST preserve immutable fields (`createdAt`, `eventId`), enforce valid schema bounds, and restrict mutations via `affectedKeys().hasOnly(['nama', 'asal', 'kategoriAsal', 'stand', 'pesan', 'status'])`.
+5. Creating and updating `/events/{eventId}` MUST enforce valid schema bounds (`headingName` 1–80, `bannerImage <= 350000`, `title` 2–120, `standSlots` exactly 5 strings each <= 80 chars), preserve `createdBy` and `createdAt`, set `updatedAt == request.time`, and restrict mutations via `affectedKeys().hasOnly(...)`. Deleting events remains restricted to `isAdmin()` and cannot delete `main-guestbook`.
 6. `/admins/{adminId}` remains locked behind Firebase Auth `isAdmin()` checks, while admin dashboard authentication in the UI uses a dedicated username/password gate without Google Sign-In.
 
 ## 2. Dirty Dozen Adversarial Payloads

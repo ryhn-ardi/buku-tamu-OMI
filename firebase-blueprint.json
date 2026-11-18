@@ -36,6 +36,16 @@
           "type": "boolean",
           "description": "Whether guests can submit entries to this event"
         },
+        "standSlots": {
+          "type": "array",
+          "description": "Fixed 5 customizable stand/booth slot names for expo check-in (empty string means unused slot)",
+          "items": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "minItems": 5,
+          "maxItems": 5
+        },
         "createdBy": {
           "type": "string",
           "description": "UID of the administrator who created the event",
@@ -60,6 +70,7 @@
         "subtitle",
         "location",
         "isActive",
+        "standSlots",
         "createdBy",
         "createdAt",
         "updatedAt"
@@ -98,6 +109,11 @@
             "Umum / Daerah",
             "Mitra / Tamu VIP"
           ]
+        },
+        "stand": {
+          "type": "string",
+          "description": "Selected expo stand/booth name visited by the guest (empty if no stand slots configured)",
+          "maxLength": 80
         },
         "pesan": {
           "type": "string",

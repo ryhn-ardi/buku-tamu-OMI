@@ -10,12 +10,16 @@ import {
   Printer,
   QrCode,
   Smartphone,
+  Store,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   DEFAULT_BANNER_IMAGE,
   DEFAULT_EVENT_FALLBACK,
   DEFAULT_EVENT_ID,
+  DEFAULT_STAND_SLOTS,
+  getActiveStands,
+  normalizeStandSlots,
   SCHEMA_LIMITS,
   type GuestbookEvent,
   type GuestEntry,
@@ -48,7 +52,14 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
   const [eventDetail, setEventDetail] = useState<
     Pick<
       GuestbookEvent,
-      'id' | 'headingName' | 'bannerImage' | 'title' | 'subtitle' | 'location' | 'isActive'
+      | 'id'
+      | 'headingName'
+      | 'bannerImage'
+      | 'title'
+      | 'subtitle'
+      | 'location'
+      | 'isActive'
+      | 'standSlots'
     >
   >({
     id: safeEventId,
@@ -58,6 +69,7 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
     subtitle: DEFAULT_EVENT_FALLBACK.subtitle,
     location: DEFAULT_EVENT_FALLBACK.location,
     isActive: true,
+    standSlots: [...DEFAULT_STAND_SLOTS],
   });
   const [copied, setCopied] = useState(false);
   const [bannerError, setBannerError] = useState(false);
@@ -74,6 +86,7 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
         subtitle: matched.subtitle,
         location: matched.location,
         isActive: matched.isActive,
+        standSlots: normalizeStandSlots(matched.standSlots),
       });
       setBannerError(false);
       onHeadingSync?.(matched.headingName || DEFAULT_EVENT_FALLBACK.headingName);
@@ -96,6 +109,7 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
             subtitle: String(data.subtitle || DEFAULT_EVENT_FALLBACK.subtitle),
             location: String(data.location || DEFAULT_EVENT_FALLBACK.location),
             isActive: typeof data.isActive === 'boolean' ? data.isActive : true,
+            standSlots: normalizeStandSlots(data.standSlots),
           });
           setBannerError(false);
           onHeadingSync?.(headingName);
@@ -108,6 +122,7 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
             subtitle: DEFAULT_EVENT_FALLBACK.subtitle,
             location: DEFAULT_EVENT_FALLBACK.location,
             isActive: true,
+            standSlots: [...DEFAULT_STAND_SLOTS],
           });
           setBannerError(false);
           onHeadingSync?.(DEFAULT_EVENT_FALLBACK.headingName);
@@ -120,6 +135,8 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
 
     return () => unsub();
   }, [safeEventId, events, onHeadingSync]);
+
+  const activeStands = getActiveStands(eventDetail.standSlots);
 
   const checkInUrl =
     typeof window !== 'undefined'
@@ -306,6 +323,18 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
               </div>
             )}
 
+            {activeStands.length > 0 && (
+              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
+                <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                  <Store className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                  <span>Pilihan Stand Expo Aktif ({activeStands.length})</span>
+                </div>
+                <p className="text-slate-600 leading-relaxed">
+                  {activeStands.join(' · ')}
+                </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 type="button"
@@ -380,6 +409,7 @@ export const QrKioskView: React.FC<QrKioskViewProps> = ({
                           </p>
                           <p className="text-xs text-slate-500 truncate">
                             {guest.asal} · {guest.kategoriAsal}
+                            {guest.stand ? ` · ${guest.stand}` : ''}
                           </p>
                         </div>
                         <span className="text-xs font-mono text-slate-500 tabular-nums shrink-0">

@@ -31,16 +31,27 @@ service cloud.firestore {
       );
     }
 
+    function isValidStandSlots(slots) {
+      return slots is list &&
+        slots.size() == 5 &&
+        slots[0] is string && slots[0].size() <= 80 &&
+        slots[1] is string && slots[1].size() <= 80 &&
+        slots[2] is string && slots[2].size() <= 80 &&
+        slots[3] is string && slots[3].size() <= 80 &&
+        slots[4] is string && slots[4].size() <= 80;
+    }
+
     // Validation Blueprints
     function isValidEvent(data) {
-      return data.keys().hasAll(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'createdBy', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'createdBy', 'createdAt', 'updatedAt']) &&
+      return data.keys().hasAll(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'standSlots', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'standSlots', 'createdBy', 'createdAt', 'updatedAt']) &&
         data.headingName is string && data.headingName.size() >= 1 && data.headingName.size() <= 80 &&
         data.bannerImage is string && data.bannerImage.size() <= 350000 &&
         data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
         data.subtitle is string && data.subtitle.size() <= 200 &&
         data.location is string && data.location.size() <= 120 &&
         data.isActive is bool &&
+        isValidStandSlots(data.standSlots) &&
         data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -48,11 +59,12 @@ service cloud.firestore {
 
     function isValidGuest(data) {
       return data.keys().hasAll(['eventId', 'nama', 'asal', 'kategoriAsal', 'pesan', 'status', 'createdAt']) &&
-        data.keys().hasOnly(['eventId', 'nama', 'asal', 'kategoriAsal', 'pesan', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['eventId', 'nama', 'asal', 'kategoriAsal', 'stand', 'pesan', 'status', 'createdAt']) &&
         isValidId(data.eventId) &&
         data.nama is string && data.nama.size() >= 2 && data.nama.size() <= 100 &&
         data.asal is string && data.asal.size() >= 2 && data.asal.size() <= 150 &&
         data.kategoriAsal in ['Instansi / Kantor', 'Sekolah / Universitas', 'Umum / Daerah', 'Mitra / Tamu VIP'] &&
+        (!('stand' in data) || (data.stand is string && data.stand.size() <= 80)) &&
         data.pesan is string && data.pesan.size() >= 2 && data.pesan.size() <= 1000 &&
         data.status in ['hadir', 'terverifikasi'] &&
         data.createdAt is timestamp;
@@ -80,7 +92,7 @@ service cloud.firestore {
         incoming().createdBy == existing().createdBy &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'standSlots', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(eventId) && eventId != 'main-guestbook';
     }
 
@@ -100,7 +112,7 @@ service cloud.firestore {
         isValidGuest(incoming()) &&
         incoming().createdAt == existing().createdAt &&
         incoming().eventId == existing().eventId &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'asal', 'kategoriAsal', 'pesan', 'status']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'asal', 'kategoriAsal', 'stand', 'pesan', 'status']);
       allow delete: if isValidId(guestId);
     }
 
