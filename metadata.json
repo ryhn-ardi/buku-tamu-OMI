@@ -1,0 +1,6 @@
+{
+  "name": "TamuKita — Buku Tamu Digital QR",
+  "description": "Platform buku tamu digital berbasis QR code dengan pemantauan kehadiran real-time, dashboard admin, serta ekspor data ke Excel dan PDF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

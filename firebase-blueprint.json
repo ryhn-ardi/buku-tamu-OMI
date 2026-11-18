@@ -1,0 +1,172 @@
+{
+  "entities": {
+    "Event": {
+      "title": "GuestbookEvent",
+      "description": "Configuration for a digital guestbook event or reception session",
+      "type": "object",
+      "properties": {
+        "headingName": {
+          "type": "string",
+          "description": "Customizable header/brand heading displayed in the top bar, QR poster, and export header",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "bannerImage": {
+          "type": "string",
+          "description": "Banner image path, external HTTPS URL, or compressed base64 data URI",
+          "maxLength": 350000
+        },
+        "title": {
+          "type": "string",
+          "description": "Event or reception title",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "subtitle": {
+          "type": "string",
+          "description": "Welcome message or instructions for guests",
+          "maxLength": 200
+        },
+        "location": {
+          "type": "string",
+          "description": "Venue or lobby location",
+          "maxLength": 120
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether guests can submit entries to this event"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of the administrator who created the event",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "headingName",
+        "bannerImage",
+        "title",
+        "subtitle",
+        "location",
+        "isActive",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GuestEntry": {
+      "title": "GuestEntry",
+      "description": "Digital guestbook attendance record submitted via QR code or desk",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "description": "Identifier of the guestbook event",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nama": {
+          "type": "string",
+          "description": "Full name of the guest",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "asal": {
+          "type": "string",
+          "description": "Origin region, institution, school, or office",
+          "minLength": 2,
+          "maxLength": 150
+        },
+        "kategoriAsal": {
+          "type": "string",
+          "description": "Category of the guest origin",
+          "enum": [
+            "Instansi / Kantor",
+            "Sekolah / Universitas",
+            "Umum / Daerah",
+            "Mitra / Tamu VIP"
+          ]
+        },
+        "pesan": {
+          "type": "string",
+          "description": "Guest message and impression",
+          "minLength": 2,
+          "maxLength": 1000
+        },
+        "status": {
+          "type": "string",
+          "description": "Attendance verification status",
+          "enum": ["hadir", "terverifikasi"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when guest checked in"
+        }
+      },
+      "required": ["eventId", "nama", "asal", "kategoriAsal", "pesan", "status", "createdAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized administrator record for the guestbook dashboard",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Verified Google email address of the admin",
+          "minLength": 3,
+          "maxLength": 150
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the administrator",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "role": {
+          "type": "string",
+          "description": "Admin privilege tier",
+          "enum": ["admin", "superadmin"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when admin was added"
+        }
+      },
+      "required": ["email", "displayName", "role", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/events/{eventId}": {
+      "schema": {
+        "$ref": "#/entities/Event"
+      },
+      "description": "Guestbook event configurations and active status"
+    },
+    "/guests/{guestId}": {
+      "schema": {
+        "$ref": "#/entities/GuestEntry"
+      },
+      "description": "Real-time guestbook submissions from QR code check-in"
+    },
+    "/admins/{adminId}": {
+      "schema": {
+        "$ref": "#/entities/AdminUser"
+      },
+      "description": "Authorized administrators who can monitor and export guestbook records"
+    }
+  }
+}

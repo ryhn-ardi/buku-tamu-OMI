@@ -1,0 +1,132 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email_verified == true && request.auth.token.email == 'reyhan.masamune@gmail.com')
+      );
+    }
+
+    // Validation Blueprints
+    function isValidEvent(data) {
+      return data.keys().hasAll(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.headingName is string && data.headingName.size() >= 1 && data.headingName.size() <= 80 &&
+        data.bannerImage is string && data.bannerImage.size() <= 350000 &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+        data.subtitle is string && data.subtitle.size() <= 200 &&
+        data.location is string && data.location.size() <= 120 &&
+        data.isActive is bool &&
+        data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidGuest(data) {
+      return data.keys().hasAll(['eventId', 'nama', 'asal', 'kategoriAsal', 'pesan', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['eventId', 'nama', 'asal', 'kategoriAsal', 'pesan', 'status', 'createdAt']) &&
+        isValidId(data.eventId) &&
+        data.nama is string && data.nama.size() >= 2 && data.nama.size() <= 100 &&
+        data.asal is string && data.asal.size() >= 2 && data.asal.size() <= 150 &&
+        data.kategoriAsal in ['Instansi / Kantor', 'Sekolah / Universitas', 'Umum / Daerah', 'Mitra / Tamu VIP'] &&
+        data.pesan is string && data.pesan.size() >= 2 && data.pesan.size() <= 1000 &&
+        data.status in ['hadir', 'terverifikasi'] &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAdmin(data) {
+      return data.keys().hasAll(['email', 'displayName', 'role', 'createdAt']) &&
+        data.keys().hasOnly(['email', 'displayName', 'role', 'createdAt']) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        data.role in ['admin', 'superadmin'] &&
+        data.createdAt is timestamp;
+    }
+
+    // Events Collection
+    match /events/{eventId} {
+      allow get: if isValidId(eventId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(eventId) &&
+        isValidEvent(incoming()) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(eventId) &&
+        isValidEvent(incoming()) &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['headingName', 'bannerImage', 'title', 'subtitle', 'location', 'isActive', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(eventId) && eventId != 'main-guestbook';
+    }
+
+    // Guests Collection (QR Code Check-in + Admin Live Monitoring)
+    match /guests/{guestId} {
+      allow get: if isAdmin() && isValidId(guestId);
+      allow list: if isAdmin();
+      allow create: if isValidId(guestId) &&
+        isValidGuest(incoming()) &&
+        incoming().status == 'hadir' &&
+        incoming().createdAt == request.time &&
+        (
+          (incoming().eventId == 'main-guestbook' && !exists(/databases/$(database)/documents/events/$(incoming().eventId))) ||
+          (exists(/databases/$(database)/documents/events/$(incoming().eventId)) && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isActive == true)
+        );
+      allow update: if isAdmin() &&
+        isValidId(guestId) &&
+        isValidGuest(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().eventId == existing().eventId &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'asal', 'kategoriAsal', 'pesan', 'status']);
+      allow delete: if isAdmin() && isValidId(guestId);
+    }
+
+    // Admins Collection
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(adminId) &&
+        isValidAdmin(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(adminId) &&
+        isValidAdmin(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'role']);
+      allow delete: if isAdmin() && isValidId(adminId) && request.auth.uid != adminId;
+    }
+
+    // Connection Healthcheck Document
+    match /test/connection {
+      allow get: if true;
+    }
+  }
+}
