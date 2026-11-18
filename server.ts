@@ -6,7 +6,7 @@ import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const HOST = '0.0.0.0';
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD_SHA256 =
@@ -735,6 +735,10 @@ async function startServer() {
     broadcastAdminEvent('event-updated', updated);
     broadcastPublicEventUpdate(id, updated);
     res.json(updated);
+  });
+
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Endpoint API tidak ditemukan.' });
   });
 
   // Vite dev middleware or production static assets

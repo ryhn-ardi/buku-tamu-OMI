@@ -42,11 +42,19 @@ async function apiRequest<T>(
 
   if (!res.ok) {
     let errMsg = `Permintaan gagal (${res.status})`;
+    let hasJsonError = false;
     try {
       const errBody = (await res.json()) as { error?: string };
-      if (errBody?.error) errMsg = errBody.error;
+      if (errBody?.error) {
+        errMsg = errBody.error;
+        hasJsonError = true;
+      }
     } catch {
       // Ignore parse failure
+    }
+    if (!hasJsonError && res.status === 404) {
+      errMsg =
+        'Layanan API server belum aktif atau tidak tersedia di URL ini (404). Pastikan Anda mengakses halaman melalui URL pratinjau aplikasi penuh dan muat ulang halaman.';
     }
     throw new Error(errMsg);
   }
