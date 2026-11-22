@@ -399,10 +399,17 @@ function GuestbookApp() {
       </main>
 
       {/* Clean Quiet Footer */}
-      <footer className="border-t border-slate-200 bg-white py-5 px-4 sm:px-6 lg:px-8 no-print hidden md:block">
-        <div className="max-w-7xl mx-auto flex items-center justify-between text-xs text-slate-500">
+      <footer
+        className={`border-t border-slate-200 bg-white pt-5 px-4 sm:px-6 lg:px-8 no-print ${
+          !isQrDirectMode ? 'pb-20 md:pb-5' : 'pb-5'
+        }`}
+      >
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500 text-center sm:text-left">
           <span>{activeHeadingName} · Buku Tamu Digital QR Real-Time</span>
-          <span>Data tersimpan aman &amp; siap ekspor Excel / PDF</span>
+          <span>
+            Data tersimpan aman &amp; siap ekspor Excel / PDF ·{' '}
+            <span className="font-medium text-slate-700">Created by ryhn_ardi</span>
+          </span>
         </div>
       </footer>
 
